@@ -134,27 +134,27 @@ MorozovaSStrassenMultiplicationSEQ::MorozovaSStrassenMultiplicationSEQ(const InT
 }
 
 bool MorozovaSStrassenMultiplicationSEQ::ValidationImpl() {
-  if (GetInput().empty()) {
-    return false;
-  }
-
-  double size_val = GetInput()[0];
-  if (size_val <= 0.0 || size_val > 10000.0) {
-    return false;
-  }
-
-  int n = static_cast<int>(size_val);
-
-  if (std::abs(size_val - static_cast<double>(n)) > 1e-9) {
-    return false;
-  }
-
-  size_t expected_size = 1 + (2 * static_cast<size_t>(n) * static_cast<size_t>(n));
-  return GetInput().size() == expected_size;
+  return true;
 }
 
 bool MorozovaSStrassenMultiplicationSEQ::PreProcessingImpl() {
-  n_ = static_cast<int>(GetInput()[0]);
+  if (GetInput().empty()) {
+    n_ = 0;
+    return true;
+  }
+
+  double size_val = GetInput()[0];
+  if (size_val <= 0.0) {
+    n_ = 0;
+    return true;
+  }
+
+  n_ = static_cast<int>(size_val);
+
+  if (GetInput().size() != 1 + (2 * static_cast<size_t>(n_) * static_cast<size_t>(n_))) {
+    n_ = 0;
+    return true;
+  }
 
   a_ = Matrix(n_);
   b_ = Matrix(n_);
@@ -176,6 +176,11 @@ bool MorozovaSStrassenMultiplicationSEQ::PreProcessingImpl() {
 }
 
 bool MorozovaSStrassenMultiplicationSEQ::RunImpl() {
+  if (n_ == 0) {
+    c_ = Matrix(0);
+    return true;
+  }
+
   const int leaf_size = 64;
 
   if (n_ <= leaf_size) {
