@@ -23,7 +23,7 @@ inline int GetWeight(int idx, int n) {
   }
 }
 
-}
+}  // namespace
 
 RedkinaAIntegralSimpsonOMP::RedkinaAIntegralSimpsonOMP(const InType &in) {
   SetTypeOfTask(GetStaticTypeOfTask());
