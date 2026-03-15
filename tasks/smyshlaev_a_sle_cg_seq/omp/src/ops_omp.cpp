@@ -80,52 +80,41 @@ bool SmyshlaevASleCgTaskOMP::PreProcessingImpl() {
   return true;
 }
 
-bool SmyshlaevASleCgTaskOMP::RunImpl() {
+bool SmyshlaevASleCgTaskOMP::RunSequential() {
   const auto &b = GetInput().b;
   size_t n = b.size();
-
-  if (n == 0) {
-    return true;
-  }
-
   std::vector<double> r = b;
   std::vector<double> p = r;
   std::vector<double> ap(n, 0.0);
   std::vector<double> result(n, 0.0);
 
   double rs_old = 0.0;
-  int n_iters = static_cast<int>(n);
-#pragma omp parallel for default(none) shared(n_iters, r) reduction(+ : rs_old)
-  for (int i = 0; i < n_iters; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     rs_old += r[i] * r[i];
   }
 
-  const int max_iterations = static_cast<int>(n) * 2;
   const double epsilon = 1e-9;
-
   if (std::sqrt(rs_old) < epsilon) {
     GetOutput() = result;
     return true;
   }
+
+  const int max_iterations = static_cast<int>(n) * 2;
   for (int iter = 0; iter < max_iterations; ++iter) {
     ComputeAp(flat_A_, p, ap, n);
-
     double p_ap = ComputeDotProduct(p, ap);
-
     if (std::abs(p_ap) < 1e-15) {
       break;
     }
 
     double alpha = rs_old / p_ap;
     double rs_new = UpdateResultAndResidual(result, r, p, ap, alpha);
-
     if (std::sqrt(rs_new) < epsilon) {
       break;
     }
 
     double beta = rs_new / rs_old;
     UpdateP(p, r, beta);
-
     rs_old = rs_new;
   }
 
@@ -133,7 +122,70 @@ bool SmyshlaevASleCgTaskOMP::RunImpl() {
   return true;
 }
 
-bool SmyshlaevASleCgTaskOMP::PostProcessingImpl() {
+bool SmyshlaevASleCgTaskOMP::RunParallel(int num_threads) {
+  const auto &b = GetInput().b;
+  size_t n = b.size();
+  std::vector<double> r = b;
+  std::vector<double> p = r;
+  std::vector<double> ap(n, 0.0);
+  std::vector<double> result(n, 0.0);
+
+  double rs_old = 0.0;
+  int n_iters = static_cast<int>(n);
+
+// Единственный вызов OMP, как в вашем исходном коде, но с фиксом для CI
+#pragma omp parallel for reduction(+ : rs_old) num_threads(num_threads)
+  for (int i = 0; i < n_iters; ++i) {
+    rs_old += r[i] * r[i];
+  }
+
+  const double epsilon = 1e-9;
+  if (std::sqrt(rs_old) < epsilon) {
+    GetOutput() = result;
+    return true;
+  }
+
+  const int max_iterations = static_cast<int>(n) * 2;
+  for (int iter = 0; iter < max_iterations; ++iter) {
+    // Остальные функции вызываются последовательно (как вы просили)
+    ComputeAp(flat_A_, p, ap, n);
+    double p_ap = ComputeDotProduct(p, ap);
+    if (std::abs(p_ap) < 1e-15) {
+      break;
+    }
+
+    double alpha = rs_old / p_ap;
+    double rs_new = UpdateResultAndResidual(result, r, p, ap, alpha);
+    if (std::sqrt(rs_new) < epsilon) {
+      break;
+    }
+
+    double beta = rs_new / rs_old;
+    UpdateP(p, r, beta);
+    rs_old = rs_new;
+  }
+
+  GetOutput() = result;
+  return true;
+}
+
+bool SmyshlaevASleCgTaskOMP::RunImpl() {
+  const auto &b = GetInput().b;
+  if (b.empty()) {
+    return true;
+  }
+
+  int num_threads = ppc::util::GetNumThreads();
+
+  // Если поток 1 (CI/Valgrind), запускаем чистый seq без инициализации OMP
+  if (num_threads <= 1) {
+    return RunSequential();
+  }
+
+  return RunParallel(num_threads);
+}
+
+ool SmyshlaevASleCgTaskOMP::PostProcessingImpl() {
   return true;
 }
 

@@ -16,6 +16,8 @@ class SmyshlaevASleCgTaskOMP : public BaseTask {
 
  private:
   std::vector<double> flat_A_;
+  bool RunSequential();
+  bool RunParallel(int num_threads);
   bool ValidationImpl() override;
   bool PreProcessingImpl() override;
   bool RunImpl() override;
