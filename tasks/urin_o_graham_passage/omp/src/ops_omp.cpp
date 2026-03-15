@@ -153,7 +153,7 @@ std::vector<Point> UrinOGrahamPassageOMP::PrepareOtherPointsParallel(const InTyp
   }
 #endif
 
-  std::sort(other_points.begin(), other_points.end(), [&p0](const Point &a, const Point &b) {
+  std::ranges::sort(other_points, [&p0](const Point &a, const Point &b) {  // Исправлено
     double angle_a = PolarAngle(p0, a);
     double angle_b = PolarAngle(p0, b);
 
