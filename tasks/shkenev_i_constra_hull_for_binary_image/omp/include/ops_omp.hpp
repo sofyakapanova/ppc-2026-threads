@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 #include "shkenev_i_constra_hull_for_binary_image/common/include/common.hpp"
 #include "task/include/task.hpp"
 

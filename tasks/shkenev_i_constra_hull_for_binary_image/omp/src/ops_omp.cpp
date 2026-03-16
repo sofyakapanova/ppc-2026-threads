@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <queue>
@@ -97,7 +96,7 @@ void ShkenevIConstrHullOMP::ThresholdImage() {
   auto &pixels = work_.pixels;
 
 #pragma omp parallel for default(none) shared(pixels) num_threads(ppc::util::GetNumThreads())
-  for (int i = 0; i < static_cast<int>(pixels.size()); ++i) {
+  for (size_t i = 0; i < pixels.size(); ++i) {  // Используем size_t вместо int
     pixels[i] = IsForeground(pixels[i]) ? static_cast<uint8_t>(255) : static_cast<uint8_t>(0);
   }
 }
