@@ -1,8 +1,9 @@
 #include "kiselev_i_trapezoidal_method_for_multidimensional_integrals/omp/include/ops_omp.hpp"
 
+#include <omp.h>
+
 #include <cmath>
 #include <vector>
-#include <omp.h>
 
 #include "kiselev_i_trapezoidal_method_for_multidimensional_integrals/common/include/common.hpp"
 
@@ -59,7 +60,6 @@ double KiselevITestTaskOMP::ComputeIntegral(const std::vector<int> &steps) {
 
   return result * hx * hy;
 }
-
 
 bool KiselevITestTaskOMP::RunImpl() {
   std::vector<int> steps = GetInput().step_n_size;
