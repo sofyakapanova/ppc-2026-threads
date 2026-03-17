@@ -57,7 +57,7 @@ bool ChernykhSTrapezoidalIntegrationOMP::RunImpl() {
   }
 
   double total_sum = 0.0;
-#pragma omp parallel default(none) shared(input, dims, total_points, total_sum)
+#pragma omp parallel default(none) shared(input, dims, total_points) reduction(+ : total_sum)
   {
     std::vector<std::size_t> local_counters(dims);  // создаем локальный вектор итераций
     std::vector<double> local_point(dims);          // значения в точках
