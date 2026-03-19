@@ -11,6 +11,8 @@
 namespace morozova_s_strassen_multiplication {
 
 namespace {
+Matrix StrassenMultiplyIterative(const Matrix &a, const Matrix &b, int leaf_size, int max_depth, int current_depth);
+Matrix StrassenMultiplyIterative(const Matrix &a, const Matrix &b, int leaf_size, int max_depth);
 
 Matrix AddMatrixImpl(const Matrix &a, const Matrix &b) {
   int n = a.size;
