@@ -18,15 +18,33 @@ bool KapanovaSSparseMatrixMultCCSOMP::ValidationImpl() {
   const auto &a = std::get<0>(GetInput());
   const auto &b = std::get<1>(GetInput());
 
-  if (a.cols != b.rows) return false;
-  if (a.rows == 0 || a.cols == 0 || b.rows == 0 || b.cols == 0) return false;
-  if (a.col_ptrs.size() != static_cast<size_t>(a.cols + 1)) return false;
-  if (b.col_ptrs.size() != static_cast<size_t>(b.cols + 1)) return false;
-  if (a.col_ptrs[0] != 0 || b.col_ptrs[0] != 0) return false;
-  if (a.col_ptrs[a.cols] != a.nnz) return false;
-  if (b.col_ptrs[b.cols] != b.nnz) return false;
-  if (a.values.size() != static_cast<size_t>(a.nnz) || a.row_indices.size() != static_cast<size_t>(a.nnz)) return false;
-  if (b.values.size() != static_cast<size_t>(b.nnz) || b.row_indices.size() != static_cast<size_t>(b.nnz)) return false;
+  if (a.cols != b.rows) {
+    return false;
+  }
+  if (a.rows == 0 || a.cols == 0 || b.rows == 0 || b.cols == 0) {
+    return false;
+  }
+  if (a.col_ptrs.size() != static_cast<size_t>(a.cols + 1)) {
+    return false;
+  }
+  if (b.col_ptrs.size() != static_cast<size_t>(b.cols + 1)) {
+    return false;
+  }
+  if (a.col_ptrs[0] != 0 || b.col_ptrs[0] != 0) {
+    return false;
+  }
+  if (a.col_ptrs[a.cols] != a.nnz) {
+    return false;
+  }
+  if (b.col_ptrs[b.cols] != b.nnz) {
+    return false;
+  }
+  if (a.values.size() != static_cast<size_t>(a.nnz) || a.row_indices.size() != static_cast<size_t>(a.nnz)) {
+    return false;
+  }
+  if (b.values.size() != static_cast<size_t>(b.nnz) || b.row_indices.size() != static_cast<size_t>(b.nnz)) {
+    return false;
+  }
 
   return true;
 }
@@ -47,13 +65,13 @@ bool KapanovaSSparseMatrixMultCCSOMP::RunImpl() {
   std::vector<std::vector<double>> col_vals(c.cols);
   std::vector<std::vector<size_t>> col_rows(c.cols);
 
-  #pragma omp parallel
+#pragma omp parallel
   {
     std::vector<double> local_accum(a.rows, 0.0);
     std::vector<bool> local_mask(a.rows, false);
     std::vector<size_t> local_active;
 
-    #pragma omp for schedule(dynamic)
+#pragma omp for schedule(dynamic)
     for (int j = 0; j < static_cast<int>(c.cols); ++j) {
       local_active.clear();
 
@@ -85,7 +103,7 @@ bool KapanovaSSparseMatrixMultCCSOMP::RunImpl() {
         local_mask[i] = false;
       }
 
-      #pragma omp critical
+#pragma omp critical
       {
         col_vals[j].insert(col_vals[j].end(), tmp_vals.begin(), tmp_vals.end());
         col_rows[j].insert(col_rows[j].end(), tmp_rows.begin(), tmp_rows.end());
