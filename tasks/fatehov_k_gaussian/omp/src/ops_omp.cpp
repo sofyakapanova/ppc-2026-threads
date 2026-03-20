@@ -56,8 +56,10 @@ bool FatehovKGaussianOMP::RunImpl() {
   const int h = static_cast<int>(input.image.height);
   const int ch = static_cast<int>(input.image.channels);
   const int half = kernel_size_ / 2;
+  const int kernel_size = kernel_size_;
+  const auto &kernel = kernel_;
 
-#pragma omp parallel for default(none) shared(input, output, w, h, ch, half, kernel_) schedule(static)
+#pragma omp parallel for default(none) shared(input, output, w, h, ch, half, kernel, kernel_size) schedule(static)
   for (int y_coord = 0; y_coord < h; y_coord++) {
     for (int x_coord = 0; x_coord < w; x_coord++) {
       for (int c_coord = 0; c_coord < ch; c_coord++) {
@@ -66,8 +68,7 @@ bool FatehovKGaussianOMP::RunImpl() {
           for (int kx = -half; kx <= half; kx++) {
             int ny = std::clamp(y_coord + ky, 0, h - 1);
             int nx = std::clamp(x_coord + kx, 0, w - 1);
-
-            float weight = kernel_[((ky + half) * kernel_size_) + (kx + half)];
+            float weight = kernel[((ky + half) * kernel_size) + (kx + half)];
             res += static_cast<float>(input.image.data[((ny * w + nx) * ch) + c_coord]) * weight;
           }
         }
