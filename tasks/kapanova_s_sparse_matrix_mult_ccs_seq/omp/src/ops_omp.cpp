@@ -3,6 +3,8 @@
 #include <omp.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <vector>
 
 #include "kapanova_s_sparse_matrix_mult_ccs_seq/common/include/common.hpp"
@@ -61,15 +63,16 @@ bool KapanovaSSparseMatrixMultCCSOMP::RunImpl() {
   c.rows = a.rows;
   c.cols = b.cols;
   c.col_ptrs.assign(c.cols + 1, 0);
+  c.nnz = 0;
 
   std::vector<std::vector<double>> col_vals(c.cols);
   std::vector<std::vector<size_t>> col_rows(c.cols);
 
-#pragma omp parallel
+#pragma omp parallel default(none) shared(a, b, col_vals, col_rows, c)
   {
     std::vector<double> local_accum(a.rows, 0.0);
-    std::vector<bool> local_mask(a.rows, false);
     std::vector<size_t> local_active;
+    local_active.reserve(a.rows);
 
 #pragma omp for schedule(dynamic)
     for (int j = 0; j < static_cast<int>(c.cols); ++j) {
@@ -82,31 +85,19 @@ bool KapanovaSSparseMatrixMultCCSOMP::RunImpl() {
         for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
           size_t i = a.row_indices[zc];
           local_accum[i] += a.values[zc] * val_b;
-          if (!local_mask[i]) {
-            local_mask[i] = true;
-            local_active.push_back(i);
-          }
+          local_active.push_back(i);
         }
       }
 
       std::sort(local_active.begin(), local_active.end());
-
-      std::vector<double> tmp_vals;
-      std::vector<size_t> tmp_rows;
+      local_active.erase(std::unique(local_active.begin(), local_active.end()), local_active.end());
 
       for (size_t i : local_active) {
-        if (local_accum[i] != 0.0) {
-          tmp_vals.push_back(local_accum[i]);
-          tmp_rows.push_back(i);
+        if (std::abs(local_accum[i]) > 1e-12) {
+          col_vals[j].push_back(local_accum[i]);
+          col_rows[j].push_back(i);
         }
         local_accum[i] = 0.0;
-        local_mask[i] = false;
-      }
-
-#pragma omp critical
-      {
-        col_vals[j].insert(col_vals[j].end(), tmp_vals.begin(), tmp_vals.end());
-        col_rows[j].insert(col_rows[j].end(), tmp_rows.begin(), tmp_rows.end());
       }
     }
   }
