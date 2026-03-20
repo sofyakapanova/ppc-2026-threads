@@ -2,6 +2,7 @@
 
 #include <omp.h>
 
+#include <utility>
 #include <algorithm>
 #include <cstddef>
 #include <ranges>
@@ -70,23 +71,25 @@ bool ChetverikovaEShellSortSimpleMergeOMP::RunImpl() {
       ind_parts[i + 1]++;
     }
   }
+  std::vector<std::vector<int>> local_buffers(counts_parts);
 
 #pragma omp parallel for default(none) shared(output, ind_parts, counts_parts) schedule(static)
   for (size_t i = 0; i < counts_parts; ++i) {
     auto left = static_cast<std::ptrdiff_t>(ind_parts[i]);
     auto right = static_cast<std::ptrdiff_t>(ind_parts[i + 1]);
 
-    std::vector<int> temp(output.begin() + left, output.begin() + right);
+    std::vector<int> temp(input.begin() + left, input.begin() + right);
     ShellSort(temp);
-    std::ranges::copy(temp.begin(), temp.end(), output.begin() + left);
+    local_buffers[i] = std::move(temp);
   }
 
-  auto current_end = static_cast<std::ptrdiff_t>(ind_parts[1]);
-
+  output = std::move(local_buffers[0]);
   for (size_t i = 1; i < counts_parts; ++i) {
-    auto next_end = static_cast<std::ptrdiff_t>(ind_parts[i + 1]);
-    std::inplace_merge(output.begin(), output.begin() + current_end, output.begin() + next_end);
-    current_end = next_end;
+    std::vector<int> merged;
+    merged.reserve(output.size() + local_buffers[i].size());
+    std::merge(output.begin(), output.end(), local_buffers[i].begin(), local_buffers[i].end(),
+               std::back_inserter(merged));
+    output = std::move(merged);
   }
 
   return true;
