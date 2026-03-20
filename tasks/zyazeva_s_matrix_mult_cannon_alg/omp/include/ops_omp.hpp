@@ -23,8 +23,8 @@ class ZyazevaSMatrixMultCannonAlgOMP : public BaseTask {
   static bool IsPerfectSquare(int x);
   static void MultiplyBlocks(const std::vector<double> &a, const std::vector<double> &b, std::vector<double> &c,
                              int block_size);
-  static void RegularMultiplication(const std::vector<double>& m1, const std::vector<double>& m2,
-                                    std::vector<double>& res, int sz);
+  static void RegularMultiplication(const std::vector<double> &m1, const std::vector<double> &m2,
+                                    std::vector<double> &res, int sz);
 };
 
 }  // namespace zyazeva_s_matrix_mult_cannon_alg

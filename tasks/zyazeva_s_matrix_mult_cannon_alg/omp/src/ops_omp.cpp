@@ -15,8 +15,8 @@ bool ZyazevaSMatrixMultCannonAlgOMP::IsPerfectSquare(int x) {
   return root * root == x;
 }
 
-void ZyazevaSMatrixMultCannonAlgOMP::MultiplyBlocks(const std::vector<double>& a, const std::vector<double>& b,
-                                                     std::vector<double>& c, int block_size) {
+void ZyazevaSMatrixMultCannonAlgOMP::MultiplyBlocks(const std::vector<double> &a, const std::vector<double> &b,
+                                                    std::vector<double> &c, int block_size) {
   for (int i = 0; i < block_size; ++i) {
     for (int k = 0; k < block_size; ++k) {
       const size_t i_idx = static_cast<size_t>(i) * block_size;
@@ -29,7 +29,7 @@ void ZyazevaSMatrixMultCannonAlgOMP::MultiplyBlocks(const std::vector<double>& a
   }
 }
 
-ZyazevaSMatrixMultCannonAlgOMP::ZyazevaSMatrixMultCannonAlgOMP(const InType& in) {
+ZyazevaSMatrixMultCannonAlgOMP::ZyazevaSMatrixMultCannonAlgOMP(const InType &in) {
   SetTypeOfTask(GetStaticTypeOfTask());
   GetInput() = in;
   GetOutput() = {};
@@ -37,8 +37,8 @@ ZyazevaSMatrixMultCannonAlgOMP::ZyazevaSMatrixMultCannonAlgOMP(const InType& in)
 
 bool ZyazevaSMatrixMultCannonAlgOMP::ValidationImpl() {
   const size_t sz = std::get<0>(GetInput());
-  const auto& m1 = std::get<1>(GetInput());
-  const auto& m2 = std::get<2>(GetInput());
+  const auto &m1 = std::get<1>(GetInput());
+  const auto &m2 = std::get<2>(GetInput());
 
   return sz > 0 && m1.size() == sz * sz && m2.size() == sz * sz;
 }
@@ -48,9 +48,8 @@ bool ZyazevaSMatrixMultCannonAlgOMP::PreProcessingImpl() {
   return true;
 }
 
-void ZyazevaSMatrixMultCannonAlgOMP::RegularMultiplication(const std::vector<double>& m1,
-                                                            const std::vector<double>& m2,
-                                                            std::vector<double>& res, int sz) {
+void ZyazevaSMatrixMultCannonAlgOMP::RegularMultiplication(const std::vector<double> &m1, const std::vector<double> &m2,
+                                                           std::vector<double> &res, int sz) {
 #pragma omp parallel for default(none) shared(m1, m2, res, sz)
   for (int i = 0; i < sz; ++i) {
     const size_t i_offset = static_cast<size_t>(i) * sz;
@@ -67,8 +66,8 @@ void ZyazevaSMatrixMultCannonAlgOMP::RegularMultiplication(const std::vector<dou
 
 bool ZyazevaSMatrixMultCannonAlgOMP::RunImpl() {
   const auto sz = static_cast<int>(std::get<0>(GetInput()));
-  const auto& m1 = std::get<1>(GetInput());
-  const auto& m2 = std::get<2>(GetInput());
+  const auto &m1 = std::get<1>(GetInput());
+  const auto &m2 = std::get<2>(GetInput());
 
   std::vector<double> res_m(static_cast<size_t>(sz) * sz, 0.0);
 
@@ -118,7 +117,8 @@ bool ZyazevaSMatrixMultCannonAlgOMP::RunImpl() {
   std::vector<std::vector<double>> aligned_a(grid_size_t * grid_size_t);
   std::vector<std::vector<double>> aligned_b(grid_size_t * grid_size_t);
 
-#pragma omp parallel for default(none) shared(blocks_a, blocks_b, aligned_a, aligned_b, grid_size, grid_size_t) collapse(2)
+#pragma omp parallel for default(none) shared(blocks_a, blocks_b, aligned_a, aligned_b, grid_size, grid_size_t) \
+    collapse(2)
   for (int i = 0; i < grid_size; ++i) {
     for (int j = 0; j < grid_size; ++j) {
       const size_t block_idx = static_cast<size_t>(i) * grid_size_t + j;
@@ -132,7 +132,8 @@ bool ZyazevaSMatrixMultCannonAlgOMP::RunImpl() {
   }
 
   for (int step = 0; step < grid_size; ++step) {
-#pragma omp parallel for default(none) shared(aligned_a, aligned_b, blocks_c, grid_size, block_size, grid_size_t) collapse(2)
+#pragma omp parallel for default(none) shared(aligned_a, aligned_b, blocks_c, grid_size, block_size, grid_size_t) \
+    collapse(2)
     for (int i = 0; i < grid_size; ++i) {
       for (int j = 0; j < grid_size; ++j) {
         const size_t block_idx = static_cast<size_t>(i) * grid_size_t + j;
@@ -144,7 +145,8 @@ bool ZyazevaSMatrixMultCannonAlgOMP::RunImpl() {
       std::vector<std::vector<double>> new_aligned_a(grid_size_t * grid_size_t);
       std::vector<std::vector<double>> new_aligned_b(grid_size_t * grid_size_t);
 
-#pragma omp parallel for default(none) shared(aligned_a, aligned_b, new_aligned_a, new_aligned_b, grid_size, grid_size_t) collapse(2)
+#pragma omp parallel for default(none) \
+    shared(aligned_a, aligned_b, new_aligned_a, new_aligned_b, grid_size, grid_size_t) collapse(2)
       for (int i = 0; i < grid_size; ++i) {
         for (int j = 0; j < grid_size; ++j) {
           const size_t block_idx = static_cast<size_t>(i) * grid_size_t + j;
@@ -162,11 +164,12 @@ bool ZyazevaSMatrixMultCannonAlgOMP::RunImpl() {
     }
   }
 
-#pragma omp parallel for default(none) shared(blocks_c, res_m, grid_size, block_size, sz_t, grid_size_t, block_size_t) collapse(2)
+#pragma omp parallel for default(none) shared(blocks_c, res_m, grid_size, block_size, sz_t, grid_size_t, block_size_t) \
+    collapse(2)
   for (int i = 0; i < grid_size; ++i) {
     for (int j = 0; j < grid_size; ++j) {
       const size_t block_idx = static_cast<size_t>(i) * grid_size_t + j;
-      const auto& block = blocks_c[block_idx];
+      const auto &block = blocks_c[block_idx];
 
       for (int bi = 0; bi < block_size; ++bi) {
         for (int bj = 0; bj < block_size; ++bj) {
