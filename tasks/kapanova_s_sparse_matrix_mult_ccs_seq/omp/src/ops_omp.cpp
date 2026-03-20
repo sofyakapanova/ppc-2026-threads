@@ -71,12 +71,13 @@ bool KapanovaSSparseMatrixMultCCSOMP::RunImpl() {
 #pragma omp parallel default(none) shared(a, b, col_vals, col_rows, c)
   {
     std::vector<double> local_accum(a.rows, 0.0);
-    std::vector<size_t> local_active;
-    local_active.reserve(a.rows);
+    std::vector<bool> row_mask(a.rows, false);
+    std::vector<size_t> active_rows;
+    active_rows.reserve(a.rows);
 
 #pragma omp for schedule(dynamic)
     for (int j = 0; j < static_cast<int>(c.cols); ++j) {
-      local_active.clear();
+      active_rows.clear();
 
       for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
         size_t row_b = b.row_indices[k];
@@ -84,20 +85,23 @@ bool KapanovaSSparseMatrixMultCCSOMP::RunImpl() {
 
         for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
           size_t i = a.row_indices[zc];
+          if (!row_mask[i]) {
+            row_mask[i] = true;
+            active_rows.push_back(i);
+          }
           local_accum[i] += a.values[zc] * val_b;
-          local_active.push_back(i);
         }
       }
 
-      std::sort(local_active.begin(), local_active.end());
-      local_active.erase(std::unique(local_active.begin(), local_active.end()), local_active.end());
+      std::sort(active_rows.begin(), active_rows.end());
 
-      for (size_t i : local_active) {
+      for (size_t i : active_rows) {
         if (std::abs(local_accum[i]) > 1e-12) {
           col_vals[j].push_back(local_accum[i]);
           col_rows[j].push_back(i);
         }
         local_accum[i] = 0.0;
+        row_mask[i] = false;
       }
     }
   }
