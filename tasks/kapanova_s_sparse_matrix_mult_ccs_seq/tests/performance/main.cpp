@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "kapanova_s_sparse_matrix_mult_ccs_seq/common/include/common.hpp"
+#include "kapanova_s_sparse_matrix_mult_ccs_seq/omp/include/ops_omp.hpp"
 #include "kapanova_s_sparse_matrix_mult_ccs_seq/seq/include/ops_seq.hpp"
 #include "util/include/perf_test_util.hpp"
 
@@ -109,8 +110,9 @@ TEST_P(KapanovaSMatrixMultiplyPerfTest, RunPerfModes) {
 
 namespace {
 
-const auto kAllPerfTasks = ppc::util::MakeAllPerfTasks<InType, KapanovaSSparseMatrixMultCCSSeq>(
-    PPC_SETTINGS_kapanova_s_sparse_matrix_mult_ccs_seq);
+const auto kAllPerfTasks =
+    ppc::util::MakeAllPerfTasks<InType, KapanovaSSparseMatrixMultCCSSeq, KapanovaSSparseMatrixMultCCSOMP>(
+        PPC_SETTINGS_kapanova_s_sparse_matrix_mult_ccs_seq);
 
 const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 
