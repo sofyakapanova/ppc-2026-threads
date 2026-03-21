@@ -70,11 +70,11 @@ namespace {
 const auto kAllPerfTasks =
     ppc::util::MakeAllPerfTasks<InType, KorolevKMatrixMultSEQ>(PPC_SETTINGS_korolev_k_matrix_mult);
 // KorolevKMatrixMultALL,
-KorolevKMatrixMultOMP
-// KorolevKMatrixMultSTL,
-// KorolevKMatrixMultTBB
+const KorolevKMatrixMultOMP
+    // KorolevKMatrixMultSTL,
+    // KorolevKMatrixMultTBB
 
-const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
+    auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 
 const auto kPerfTestName = KorolevKMatrixMultRunPerfTestThreads::CustomPerfTestName;
 
