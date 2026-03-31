@@ -90,11 +90,11 @@ bool TimurACannonMatrixMultiplicationSTL::ValidationImpl() {
   int b_size = std::get<0>(input);
   const auto &mat_a = std::get<1>(input);
   const auto &mat_b = std::get<2>(input);
-  
+
   if (b_size <= 0 || mat_a.empty() || mat_b.empty()) {
     return false;
   }
-  
+
   size_t n = mat_a.size();
   return mat_a[0].size() == n && mat_b.size() == n && (n % static_cast<size_t>(b_size) == 0);
 }
@@ -134,7 +134,7 @@ bool TimurACannonMatrixMultiplicationSTL::RunImpl() {
 
   Matrix result(n, std::vector<double>(n));
   AssembleResult(bl_c, result, b_size, grid_sz);
-  
+
   GetOutput() = std::move(result);
   return true;
 }
