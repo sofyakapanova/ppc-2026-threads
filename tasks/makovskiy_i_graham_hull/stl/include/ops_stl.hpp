@@ -1,0 +1,21 @@
+#pragma once
+
+#include "makovskiy_i_graham_hull/common/include/common.hpp"
+
+namespace makovskiy_i_graham_hull {
+
+class ConvexHullGrahamSTL : public BaseTask {
+ public:
+  static constexpr ppc::task::TypeOfTask GetStaticTypeOfTask() {
+    return ppc::task::TypeOfTask::kSTL;
+  }
+  explicit ConvexHullGrahamSTL(const InType &in);
+
+ private:
+  bool ValidationImpl() override;
+  bool PreProcessingImpl() override;
+  bool RunImpl() override;
+  bool PostProcessingImpl() override;
+};
+
+}  // namespace makovskiy_i_graham_hull
