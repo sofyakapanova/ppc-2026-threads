@@ -14,8 +14,8 @@ namespace terekhov_d_gauss_vert {
 
 namespace {
 
-inline void ProcessPixel(OutType &output, const std::vector<int> &padded_image, int padded_width,
-                         int width, int row, int col) {
+inline void ProcessPixel(OutType &output, const std::vector<int> &padded_image, int padded_width, int width, int row,
+                         int col) {
   size_t idx = (static_cast<size_t>(row) * static_cast<size_t>(width)) + static_cast<size_t>(col);
   float sum = 0.0F;
   for (int ky = -1; ky <= 1; ++ky) {
@@ -23,17 +23,15 @@ inline void ProcessPixel(OutType &output, const std::vector<int> &padded_image, 
       int px = col + kx + 1;
       int py = row + ky + 1;
       int kernel_idx = ((ky + 1) * 3) + (kx + 1);
-      size_t padded_idx =
-          (static_cast<size_t>(py) * static_cast<size_t>(padded_width)) + static_cast<size_t>(px);
-      sum += static_cast<float>(padded_image[padded_idx]) *
-             kGaussKernel[static_cast<size_t>(kernel_idx)];
+      size_t padded_idx = (static_cast<size_t>(py) * static_cast<size_t>(padded_width)) + static_cast<size_t>(px);
+      sum += static_cast<float>(padded_image[padded_idx]) * kGaussKernel[static_cast<size_t>(kernel_idx)];
     }
   }
   output.data[idx] = static_cast<int>(std::lround(sum));
 }
 
-inline void ProcessBand(OutType &output, const std::vector<int> &padded_image, int padded_width,
-                        int width, int height, int band, int band_width, int num_bands) {
+inline void ProcessBand(OutType &output, const std::vector<int> &padded_image, int padded_width, int width, int height,
+                        int band, int band_width, int num_bands) {
   int start_x = band * band_width;
   int end_x = (band == num_bands - 1) ? width : ((band + 1) * band_width);
   for (int row = 0; row < height; ++row) {
@@ -53,13 +51,12 @@ inline OutType SolveTBB(const std::vector<int> &padded_image, int width, int hei
   const int band_width = std::max(width / 4, 1);
   const int num_bands = 4;
 
-  oneapi::tbb::parallel_for(
-      oneapi::tbb::blocked_range<int>(0, num_bands),
-      [&](const oneapi::tbb::blocked_range<int> &range) {
-        for (int band = range.begin(); band != range.end(); ++band) {
-          ProcessBand(output, padded_image, padded_width, width, height, band, band_width, num_bands);
-        }
-      });
+  oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, num_bands),
+                            [&](const oneapi::tbb::blocked_range<int> &range) {
+    for (int band = range.begin(); band != range.end(); ++band) {
+      ProcessBand(output, padded_image, padded_width, width, height, band, band_width, num_bands);
+    }
+  });
 
   return output;
 }
@@ -109,10 +106,8 @@ bool TerekhovDGaussVertTBB::PreProcessingImpl() {
         src_y = (2 * height_) - src_y - 1;
       }
 
-      size_t padded_idx =
-          (static_cast<size_t>(row) * static_cast<size_t>(padded_width)) + static_cast<size_t>(col);
-      size_t src_idx =
-          (static_cast<size_t>(src_y) * static_cast<size_t>(width_)) + static_cast<size_t>(src_x);
+      size_t padded_idx = (static_cast<size_t>(row) * static_cast<size_t>(padded_width)) + static_cast<size_t>(col);
+      size_t src_idx = (static_cast<size_t>(src_y) * static_cast<size_t>(width_)) + static_cast<size_t>(src_x);
       padded_image_[padded_idx] = input.data[src_idx];
     }
   }
@@ -129,8 +124,7 @@ bool TerekhovDGaussVertTBB::RunImpl() {
 }
 
 bool TerekhovDGaussVertTBB::PostProcessingImpl() {
-  return GetOutput().data.size() ==
-         (static_cast<size_t>(GetOutput().width) * static_cast<size_t>(GetOutput().height));
+  return GetOutput().data.size() == (static_cast<size_t>(GetOutput().width) * static_cast<size_t>(GetOutput().height));
 }
 
 }  // namespace terekhov_d_gauss_vert
