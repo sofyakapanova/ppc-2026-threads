@@ -45,17 +45,17 @@ bool LopatinASobelOperatorTBB::RunImpl() {
         int gy = 0;
 
         for (int ky = -1; ky <= 1; ++ky) {
-            std::uint8_t pixel = input_data[((j + ky) * w_) + (i - 1)];
-            gx += pixel * kSobelX.at(ky + 1).at(0);
-            gy += pixel * kSobelY.at(ky + 1).at(0);
+          std::uint8_t pixel = input_data[((j + ky) * w_) + (i - 1)];
+          gx += pixel * kSobelX.at(ky + 1).at(0);
+          gy += pixel * kSobelY.at(ky + 1).at(0);
 
-            pixel = input_data[((j + ky) * w_) + (i)];
-            gx += pixel * kSobelX.at(ky + 1).at(1);
-            gy += pixel * kSobelY.at(ky + 1).at(1);
+          pixel = input_data[((j + ky) * w_) + (i)];
+          gx += pixel * kSobelX.at(ky + 1).at(1);
+          gy += pixel * kSobelY.at(ky + 1).at(1);
 
-            pixel = input_data[((j + ky) * w_) + (i + 1)];
-            gx += pixel * kSobelX.at(ky + 1).at(2);
-            gy += pixel * kSobelY.at(ky + 1).at(2);
+          pixel = input_data[((j + ky) * w_) + (i + 1)];
+          gx += pixel * kSobelX.at(ky + 1).at(2);
+          gy += pixel * kSobelY.at(ky + 1).at(2);
         }
 
         auto magnitude = static_cast<int>(round(std::sqrt((gx * gx) + (gy * gy))));
