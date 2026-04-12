@@ -1,10 +1,8 @@
 #include "kotelnikova_a_double_matr_mult/stl/include/ops_stl.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <cstddef>
-#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -75,7 +73,7 @@ bool KotelnikovaATaskSTL::PreProcessingImpl() {
 namespace {
 
 std::vector<double> ComputeColumn(const SparseMatrixCCS &a, const SparseMatrixCCS &b, int col_idx) {
-  std::vector<double> temp(a.rows, 0.0);
+  std::vector<double> temp(static_cast<size_t>(a.rows), 0.0);
 
   for (int b_idx = b.col_ptrs[col_idx]; b_idx < b.col_ptrs[col_idx + 1]; ++b_idx) {
     const int k = b.row_indices[b_idx];
@@ -83,7 +81,7 @@ std::vector<double> ComputeColumn(const SparseMatrixCCS &a, const SparseMatrixCC
 
     for (int a_idx = a.col_ptrs[k]; a_idx < a.col_ptrs[k + 1]; ++a_idx) {
       const int i = a.row_indices[a_idx];
-      temp[i] += a.values[a_idx] * b_val;
+      temp[static_cast<size_t>(i)] += a.values[a_idx] * b_val;
     }
   }
 
@@ -105,8 +103,8 @@ void FillColumn(const std::vector<double> &column, double epsilon, std::vector<i
   int pos = start_pos;
   for (size_t i = 0; i < column.size(); ++i) {
     if (std::abs(column[i]) > epsilon) {
-      row_indices[pos] = static_cast<int>(i);
-      values[pos] = column[i];
+      row_indices[static_cast<size_t>(pos)] = static_cast<int>(i);
+      values[static_cast<size_t>(pos)] = column[i];
       ++pos;
     }
   }
@@ -118,14 +116,16 @@ SparseMatrixCCS KotelnikovaATaskSTL::MultiplyMatrices(const SparseMatrixCCS &a, 
   SparseMatrixCCS result(a.rows, b.cols);
 
   const double epsilon = 1e-10;
-  const int num_threads = std::thread::hardware_concurrency();
+  const unsigned int hardware_threads = std::thread::hardware_concurrency();
+  const int num_threads = (hardware_threads > 0) ? static_cast<int>(hardware_threads) : 1;
   const int cols_per_thread = (b.cols + num_threads - 1) / num_threads;
 
+  // Первый проход: подсчет ненулевых элементов
   std::vector<int> col_start(b.cols, 0);
   std::vector<std::thread> threads;
 
-  for (int t = 0; t < num_threads; ++t) {
-    int start_col = t * cols_per_thread;
+  for (int thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
+    int start_col = thread_idx * cols_per_thread;
     int end_col = std::min(start_col + cols_per_thread, b.cols);
 
     threads.emplace_back([&, start_col, end_col]() {
@@ -140,19 +140,21 @@ SparseMatrixCCS KotelnikovaATaskSTL::MultiplyMatrices(const SparseMatrixCCS &a, 
     thread.join();
   }
 
+  // Префиксная сумма для построения col_ptrs (последовательная)
   std::vector<int> col_ptr(b.cols + 1, 0);
   for (int j = 0; j < b.cols; ++j) {
     col_ptr[j + 1] = col_ptr[j] + col_start[j];
   }
 
   const int total_nnz = col_ptr[b.cols];
-  result.values.resize(total_nnz);
-  result.row_indices.resize(total_nnz);
+  result.values.resize(static_cast<size_t>(total_nnz));
+  result.row_indices.resize(static_cast<size_t>(total_nnz));
   result.col_ptrs = col_ptr;
 
+  // Второй проход: заполнение данных
   threads.clear();
-  for (int t = 0; t < num_threads; ++t) {
-    int start_col = t * cols_per_thread;
+  for (int thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
+    int start_col = thread_idx * cols_per_thread;
     int end_col = std::min(start_col + cols_per_thread, b.cols);
 
     threads.emplace_back([&, start_col, end_col]() {
