@@ -47,25 +47,23 @@ bool AfanasyevAIntegRectMethodTBB::RunImpl() {
   const double h = 1.0 / static_cast<double>(n);
   const long long total_points = static_cast<long long>(n) * n * n;
 
-  const double sum = tbb::parallel_reduce(
-      tbb::blocked_range<long long>(0, total_points), 0.0,
-      [&](const tbb::blocked_range<long long> &range, double local_sum) {
-        std::array<double, 3> x{};
-        const long long plane = static_cast<long long>(n) * n;
-        for (long long index = range.begin(); index != range.end(); ++index) {
-          const int i = static_cast<int>(index / plane);
-          const int j = static_cast<int>((index / n) % n);
-          const int k = static_cast<int>(index % n);
+  const double sum = tbb::parallel_reduce(tbb::blocked_range<long long>(0, total_points), 0.0,
+                                          [&](const tbb::blocked_range<long long> &range, double local_sum) {
+    std::array<double, 3> x{};
+    const long long plane = static_cast<long long>(n) * n;
+    for (long long index = range.begin(); index != range.end(); ++index) {
+      const int i = static_cast<int>(index / plane);
+      const int j = static_cast<int>((index / n) % n);
+      const int k = static_cast<int>(index % n);
 
-          x[0] = (static_cast<double>(i) + 0.5) * h;
-          x[1] = (static_cast<double>(j) + 0.5) * h;
-          x[2] = (static_cast<double>(k) + 0.5) * h;
+      x[0] = (static_cast<double>(i) + 0.5) * h;
+      x[1] = (static_cast<double>(j) + 0.5) * h;
+      x[2] = (static_cast<double>(k) + 0.5) * h;
 
-          local_sum += ExampleIntegrand(x);
-        }
-        return local_sum;
-      },
-      std::plus<double>());
+      local_sum += ExampleIntegrand(x);
+    }
+    return local_sum;
+  }, std::plus<double>());
 
   const double volume = std::pow(h, k_dim);
   GetOutput() = sum * volume;
