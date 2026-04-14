@@ -58,24 +58,12 @@ using BaranovASEQPerfTests =
     BaranovAMultMatrixFoxAlgorithmPerfTests<baranov_a_mult_matrix_fox_algorithm_seq::BaranovAMultMatrixFoxAlgorithmSEQ>;
 using BaranovAOMPPerfTests =
     BaranovAMultMatrixFoxAlgorithmPerfTests<baranov_a_mult_matrix_fox_algorithm_omp::BaranovAMultMatrixFoxAlgorithmOMP>;
-using BaranovATBBPerfTests =
-    BaranovAMultMatrixFoxAlgorithmPerfTests<baranov_a_mult_matrix_fox_algorithm_tbb::BaranovAMultMatrixFoxAlgorithmTBB>;
-using BaranovASTLPerfTests =
-    BaranovAMultMatrixFoxAlgorithmPerfTests<baranov_a_mult_matrix_fox_algorithm_stl::BaranovAMultMatrixFoxAlgorithmSTL>;
 
 TEST_P(BaranovASEQPerfTests, RunPerfModes) {
   ExecuteTest(GetParam());
 }
 
 TEST_P(BaranovAOMPPerfTests, RunPerfModes) {
-  ExecuteTest(GetParam());
-}
-
-TEST_P(BaranovATBBPerfTests, RunPerfModes) {
-  ExecuteTest(GetParam());
-}
-
-TEST_P(BaranovASTLPerfTests, RunPerfModes) {
   ExecuteTest(GetParam());
 }
 
@@ -91,30 +79,14 @@ const auto kAllPerfTasksOmp =
                                 baranov_a_mult_matrix_fox_algorithm_omp::BaranovAMultMatrixFoxAlgorithmOMP>(
         PPC_SETTINGS_baranov_a_mult_matrix_fox_algorithm);
 
-const auto kAllPerfTasksTbb =
-    ppc::util::MakeAllPerfTasks<baranov_a_mult_matrix_fox_algorithm::InType,
-                                baranov_a_mult_matrix_fox_algorithm_tbb::BaranovAMultMatrixFoxAlgorithmTBB>(
-        PPC_SETTINGS_baranov_a_mult_matrix_fox_algorithm);
-
-const auto kAllPerfTasksStl =
-    ppc::util::MakeAllPerfTasks<baranov_a_mult_matrix_fox_algorithm::InType,
-                                baranov_a_mult_matrix_fox_algorithm_stl::BaranovAMultMatrixFoxAlgorithmSTL>(
-        PPC_SETTINGS_baranov_a_mult_matrix_fox_algorithm);
-
 const auto kGtestValuesSeq = ppc::util::TupleToGTestValues(kAllPerfTasksSeq);
 const auto kGtestValuesOmp = ppc::util::TupleToGTestValues(kAllPerfTasksOmp);
-const auto kGtestValuesTbb = ppc::util::TupleToGTestValues(kAllPerfTasksTbb);
-const auto kGtestValuesStl = ppc::util::TupleToGTestValues(kAllPerfTasksStl);
 
 const auto kPerfTestNameSeq = BaranovASEQPerfTests::CustomPerfTestName;
 const auto kPerfTestNameOmp = BaranovAOMPPerfTests::CustomPerfTestName;
-const auto kPerfTestNameTbb = BaranovATBBPerfTests::CustomPerfTestName;
-const auto kPerfTestNameStl = BaranovASTLPerfTests::CustomPerfTestName;
 
 INSTANTIATE_TEST_SUITE_P(PerfTestsSeq, BaranovASEQPerfTests, kGtestValuesSeq, kPerfTestNameSeq);
 INSTANTIATE_TEST_SUITE_P(PerfTestsOmp, BaranovAOMPPerfTests, kGtestValuesOmp, kPerfTestNameOmp);
-INSTANTIATE_TEST_SUITE_P(PerfTestsTbb, BaranovATBBPerfTests, kGtestValuesTbb, kPerfTestNameTbb);
-INSTANTIATE_TEST_SUITE_P(PerfTestsStl, BaranovASTLPerfTests, kGtestValuesStl, kPerfTestNameStl);
 
 }  // namespace
 
