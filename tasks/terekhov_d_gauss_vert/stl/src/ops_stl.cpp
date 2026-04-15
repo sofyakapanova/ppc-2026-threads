@@ -10,11 +10,11 @@
 #include "util/include/util.hpp"
 
 namespace terekhov_d_gauss_vert {
-
+// 1232
 namespace {
 
-inline void ProcessPixel(OutType &output, const std::vector<int> &padded_image, int padded_width, 
-                         int width, int row, int col) {
+inline void ProcessPixel(OutType &output, const std::vector<int> &padded_image, int padded_width, int width, int row,
+                         int col) {
   size_t idx = (static_cast<size_t>(row) * static_cast<size_t>(width)) + static_cast<size_t>(col);
   float sum = 0.0F;
   for (int ky = -1; ky <= 1; ++ky) {
@@ -29,8 +29,8 @@ inline void ProcessPixel(OutType &output, const std::vector<int> &padded_image, 
   output.data[idx] = static_cast<int>(std::lround(sum));
 }
 
-void ProcessBand(OutType &output, const std::vector<int> &padded_image, int padded_width, 
-                 int width, int height, int band, int band_width, int num_bands) {
+void ProcessBand(OutType &output, const std::vector<int> &padded_image, int padded_width, int width, int height,
+                 int band, int band_width, int num_bands) {
   int start_x = band * band_width;
   int end_x = (band == num_bands - 1) ? width : ((band + 1) * band_width);
   for (int row = 0; row < height; ++row) {
@@ -55,10 +55,8 @@ OutType SolveSTL(const std::vector<int> &padded_image, int width, int height) {
   threads.reserve(static_cast<size_t>(num_threads));
 
   for (int band = 0; band < num_bands; ++band) {
-    threads.emplace_back([&output, &padded_image, padded_width, width, height, 
-                          band, band_width, num_bands]() {
-      ProcessBand(output, padded_image, padded_width, width, height, 
-                  band, band_width, num_bands);
+    threads.emplace_back([&output, &padded_image, padded_width, width, height, band, band_width, num_bands]() {
+      ProcessBand(output, padded_image, padded_width, width, height, band, band_width, num_bands);
     });
   }
 
