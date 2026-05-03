@@ -53,44 +53,68 @@ bool KapanovaSSparseMatrixMultCCSSTL::PreProcessingImpl() {
   return true;
 }
 
+bool KapanovaSSparseMatrixMultCCSSTL::PostProcessingImpl() {
+  return true;
+}
+
 namespace {
 
-void ProcessColumn(int j, const CCSMatrix &a, const CCSMatrix &b, std::vector<size_t> &out_rows,
-                   std::vector<double> &out_vals) {
-  std::vector<double> accum(a.rows, 0.0);
-  std::vector<bool> mask(a.rows, false);
+struct ThreadLocalData {
+  std::vector<double> accum;
+  std::vector<char> mask;
   std::vector<size_t> active;
+
+  ThreadLocalData(size_t rows) {
+    accum.assign(rows, 0.0);
+    mask.assign(rows, 0);
+    active.reserve(rows / 20);
+  }
+
+  void clearActive() {
+    for (size_t i : active) {
+      accum[i] = 0.0;
+      mask[i] = 0;
+    }
+    active.clear();
+  }
+};
+
+void ProcessColumn(int j, const CCSMatrix &a, const CCSMatrix &b, std::vector<size_t> &out_rows,
+                   std::vector<double> &out_vals, ThreadLocalData &local) {
+  local.clearActive();
 
   for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
     size_t row_b = b.row_indices[k];
     double val_b = b.values[k];
+
     for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
       size_t i = a.row_indices[zc];
       double val_a = a.values[zc];
-      accum[i] += val_a * val_b;
-      if (!mask[i]) {
-        mask[i] = true;
-        active.push_back(i);
+
+      local.accum[i] += val_a * val_b;
+      if (!local.mask[i]) {
+        local.mask[i] = 1;
+        local.active.push_back(i);
       }
     }
   }
 
-  std::sort(active.begin(), active.end());
+  std::sort(local.active.begin(), local.active.end());
 
-  for (size_t i : active) {
-    if (accum[i] != 0.0) {
+  for (size_t i : local.active) {
+    if (local.accum[i] != 0.0) {
       out_rows.push_back(i);
-      out_vals.push_back(accum[i]);
+      out_vals.push_back(local.accum[i]);
     }
-    accum[i] = 0.0;
-    mask[i] = false;
   }
 }
 
-void Worker(const CCSMatrix &a, const CCSMatrix &b, int start, int end, std::vector<std::vector<size_t>> &rows,
+void Worker(const CCSMatrix &a, const CCSMatrix &b, int start_col, int end_col, std::vector<std::vector<size_t>> &rows,
             std::vector<std::vector<double>> &vals) {
-  for (int j = start; j < end; ++j) {
-    ProcessColumn(j, a, b, rows[j], vals[j]);
+  ThreadLocalData local(a.rows);
+
+  for (int j = start_col; j < end_col; ++j) {
+    ProcessColumn(j, a, b, rows[j], vals[j], local);
   }
 }
 
@@ -113,8 +137,14 @@ bool KapanovaSSparseMatrixMultCCSSTL::RunImpl() {
 
   std::vector<std::vector<size_t>> temp_rows(c.cols);
   std::vector<std::vector<double>> temp_vals(c.cols);
-  std::vector<std::thread> threads;
 
+  size_t est_nnz_per_col = (a.nnz * b.nnz / a.cols / c.cols) + 1;
+  for (size_t j = 0; j < c.cols; ++j) {
+    temp_rows[j].reserve(est_nnz_per_col);
+    temp_vals[j].reserve(est_nnz_per_col);
+  }
+
+  std::vector<std::thread> threads;
   int chunk = (c.cols + num_threads - 1) / num_threads;
 
   for (unsigned int t = 0; t < num_threads; ++t) {
@@ -123,6 +153,7 @@ bool KapanovaSSparseMatrixMultCCSSTL::RunImpl() {
     if (start >= (int)c.cols) {
       break;
     }
+
     threads.emplace_back(Worker, std::cref(a), std::cref(b), start, end, std::ref(temp_rows), std::ref(temp_vals));
   }
 
@@ -152,10 +183,6 @@ bool KapanovaSSparseMatrixMultCCSSTL::RunImpl() {
     }
   }
 
-  return true;
-}
-
-bool KapanovaSSparseMatrixMultCCSSTL::PostProcessingImpl() {
   return true;
 }
 
