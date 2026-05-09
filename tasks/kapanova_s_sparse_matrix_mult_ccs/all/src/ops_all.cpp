@@ -135,7 +135,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
           }
         }
 
-        std::ranges::sort(active);
+        std::sort(active.begin(), active.end());
         for (size_t i : active) {
           if (accum[i] != 0.0) {
             temp_rows[local_idx].push_back(i);
