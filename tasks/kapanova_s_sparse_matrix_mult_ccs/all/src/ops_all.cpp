@@ -34,8 +34,7 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 namespace {
 
 std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
-  std::vector<size_t> ranges(num_procs + 1);
-  ranges[0] = 0;
+  std::vector<size_t> ranges(num_procs + 1, 0);
   ranges[num_procs] = static_cast<size_t>(total_cols);
 
   if (total_cols == 0) {
