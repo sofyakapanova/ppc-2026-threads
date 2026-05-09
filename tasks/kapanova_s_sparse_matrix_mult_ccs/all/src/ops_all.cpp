@@ -38,6 +38,10 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
   ranges[0] = 0;
   ranges[num_procs] = static_cast<size_t>(total_cols);
 
+  if (total_cols == 0) {
+    return ranges;
+  }
+
   std::vector<int> col_cost(total_cols);
   int total_cost = 0;
 #pragma omp parallel for reduction(+ : total_cost) schedule(guided)
@@ -152,27 +156,24 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
 
   std::vector<uint64_t> send_rows(local_nnz);
   std::vector<double> send_vals(local_nnz);
-  std::vector<uint64_t> send_ptrs(local_cols + 1);
 
-  send_ptrs[0] = 0;
+  size_t offset = 0;
   for (size_t j = 0; j < local_cols; ++j) {
-    send_ptrs[j + 1] = send_ptrs[j] + local_sizes[j];
     for (int k = 0; k < local_sizes[j]; ++k) {
-      send_rows[send_ptrs[j] + k] = static_cast<uint64_t>(temp_rows[j][k]);
-      send_vals[send_ptrs[j] + k] = temp_vals[j][k];
+      send_rows[offset + k] = static_cast<uint64_t>(temp_rows[j][k]);
+      send_vals[offset + k] = temp_vals[j][k];
     }
+    offset += local_sizes[j];
   }
 
   std::vector<int> recv_counts(mpi_size);
-  std::vector<int> displs_nnz(mpi_size);
+  std::vector<int> displs(mpi_size, 0);
   MPI_Gather(&local_nnz, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
   int total_nnz = 0;
-  std::vector<int> displs(mpi_size, 0);
   if (mpi_rank == 0) {
     for (int i = 0; i < mpi_size; ++i) {
       displs[i] = total_nnz;
-      displs_nnz[i] = recv_counts[i];
       total_nnz += recv_counts[i];
     }
     c.nnz = total_nnz;
@@ -210,12 +211,12 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
               MPI_INT, 0, MPI_COMM_WORLD);
 
   if (mpi_rank == 0) {
-    size_t offset = 0;
+    size_t off = 0;
     for (size_t j = 0; j < static_cast<size_t>(c.cols); ++j) {
-      c.col_ptrs[j] = offset;
-      offset += static_cast<size_t>(all_col_sizes[j]);
+      c.col_ptrs[j] = off;
+      off += static_cast<size_t>(all_col_sizes[j]);
     }
-    c.col_ptrs[c.cols] = offset;
+    c.col_ptrs[c.cols] = off;
   }
 
   uint64_t nnz_tmp = c.nnz;
