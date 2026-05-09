@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
 #include <vector>
 
 #include "kapanova_s_sparse_matrix_mult_ccs/common/include/common.hpp"
@@ -33,6 +34,7 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 
 namespace {
 
+// NOLINTNEXTLINE
 std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<size_t> ranges(num_procs + 1, 0);
   ranges[num_procs] = static_cast<size_t>(total_cols);
@@ -43,7 +45,7 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
 
   std::vector<int> col_cost(total_cols);
   int total_cost = 0;
-#pragma omp parallel for reduction(+ : total_cost) schedule(guided)
+#pragma omp parallel for reduction(+ : total_cost) schedule(guided) default(none) shared(a, b, col_cost, total_cols)
   for (int j = 0; j < total_cols; ++j) {
     int cost = 0;
     for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
@@ -58,18 +60,18 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
   int current_col = 0;
   int accumulated_cost = 0;
 
-  for (int p = 1; p < num_procs; ++p) {
-    int target_cost = p * cost_per_proc;
+  for (int proc = 1; proc < num_procs; ++proc) {
+    int target_cost = proc * cost_per_proc;
     while (current_col < total_cols && accumulated_cost < target_cost) {
       accumulated_cost += col_cost[current_col];
       ++current_col;
     }
-    ranges[p] = static_cast<size_t>(current_col);
+    ranges[proc] = static_cast<size_t>(current_col);
   }
 
-  for (int p = num_procs - 1; p > 0; --p) {
-    if (ranges[p] == ranges[p - 1] && static_cast<int>(ranges[p]) < total_cols) {
-      ranges[p]++;
+  for (int proc = num_procs - 1; proc > 0; --proc) {
+    if (ranges[proc] == ranges[proc - 1] && std::cmp_less(ranges[proc], total_cols)) {
+      ranges[proc]++;
     }
   }
 
@@ -78,35 +80,37 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
 
 }  // namespace
 
+// NOLINTNEXTLINE
 bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   const auto &a = std::get<0>(GetInput());
   const auto &b = std::get<1>(GetInput());
-  OutType &c = GetOutput();
+  auto &c = GetOutput();
 
   c.rows = a.rows;
   c.cols = b.cols;
 
-  int mpi_rank = 0, mpi_size = 1;
+  int mpi_rank = 0;
+  int mpi_size = 1;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
 
   std::vector<uint64_t> ranges(mpi_size + 1);
   if (mpi_rank == 0) {
-    auto raw = ComputeBalancedRanges(c.cols, mpi_size, a, b);
+    auto raw = ComputeBalancedRanges(static_cast<int>(c.cols), mpi_size, a, b);
     ranges.assign(raw.begin(), raw.end());
   }
   MPI_Bcast(ranges.data(), mpi_size + 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
-  size_t start_col = ranges[mpi_rank];
-  size_t end_col = ranges[mpi_rank + 1];
-  size_t local_cols = end_col - start_col;
+  auto start_col = ranges[mpi_rank];
+  auto end_col = ranges[mpi_rank + 1];
+  auto local_cols = end_col - start_col;
 
   std::vector<int> local_sizes(local_cols, 0);
   std::vector<std::vector<size_t>> temp_rows(local_cols);
   std::vector<std::vector<double>> temp_vals(local_cols);
 
   if (local_cols > 0) {
-#pragma omp parallel
+#pragma omp parallel default(none) shared(a, b, start_col, local_cols, temp_rows, temp_vals, local_sizes)
     {
       std::vector<double> accum(a.rows, 0.0);
       std::vector<char> mask(a.rows, 0);
@@ -133,7 +137,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
           }
         }
 
-        std::sort(active.begin(), active.end());
+        std::ranges::sort(active);
         for (size_t i : active) {
           if (accum[i] != 0.0) {
             temp_rows[local_idx].push_back(i);
@@ -148,10 +152,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     }
   }
 
-  int local_nnz = 0;
-  for (size_t j = 0; j < local_cols; ++j) {
-    local_nnz += local_sizes[j];
-  }
+  int local_nnz = std::accumulate(local_sizes.begin(), local_sizes.end(), 0);
 
   std::vector<uint64_t> send_rows(local_nnz);
   std::vector<double> send_vals(local_nnz);
@@ -162,7 +163,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
       send_rows[offset + k] = static_cast<uint64_t>(temp_rows[j][k]);
       send_vals[offset + k] = temp_vals[j][k];
     }
-    offset += local_sizes[j];
+    offset += static_cast<size_t>(local_sizes[j]);
   }
 
   std::vector<int> recv_counts(mpi_size);
@@ -175,7 +176,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
       displs[i] = total_nnz;
       total_nnz += recv_counts[i];
     }
-    c.nnz = total_nnz;
+    c.nnz = static_cast<size_t>(total_nnz);
     c.values.resize(c.nnz);
     c.row_indices.resize(c.nnz);
     c.col_ptrs.resize(c.cols + 1);
@@ -218,15 +219,15 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     c.col_ptrs[c.cols] = off;
   }
 
-  uint64_t nnz_tmp = c.nnz;
-  uint64_t cols_p1 = static_cast<uint64_t>(c.cols + 1);
+  auto nnz_tmp = static_cast<uint64_t>(c.nnz);
+  auto cols_p1 = static_cast<uint64_t>(c.cols + 1);
   MPI_Bcast(&nnz_tmp, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
   MPI_Bcast(&cols_p1, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
   if (mpi_rank != 0) {
     c.col_ptrs.resize(cols_p1);
   }
-  MPI_Bcast(c.col_ptrs.data(), cols_p1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(c.col_ptrs.data(), static_cast<int>(cols_p1), MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
   if (mpi_rank != 0) {
     c.cols = static_cast<int>(cols_p1 - 1);
