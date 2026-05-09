@@ -21,24 +21,26 @@ bool KapanovaSSparseMatrixMultCCSALL::ValidationImpl() {
   const auto &a = std::get<0>(GetInput());
   const auto &b = std::get<1>(GetInput());
   return (a.cols == b.rows && a.rows > 0 && a.cols > 0 && b.rows > 0 && b.cols > 0 &&
-          a.col_ptrs.size() == static_cast<size_t>(a.cols + 1) &&
-          b.col_ptrs.size() == static_cast<size_t>(b.cols + 1));
+          a.col_ptrs.size() == static_cast<size_t>(a.cols + 1) && b.col_ptrs.size() == static_cast<size_t>(b.cols + 1));
 }
 
-bool KapanovaSSparseMatrixMultCCSALL::PreProcessingImpl() { return true; }
-bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() { return true; }
+bool KapanovaSSparseMatrixMultCCSALL::PreProcessingImpl() {
+  return true;
+}
+bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
+  return true;
+}
 
 namespace {
 
-std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs,
-                                          const CCSMatrix &a, const CCSMatrix &b) {
+std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<size_t> ranges(num_procs + 1);
   ranges[0] = 0;
   ranges[num_procs] = static_cast<size_t>(total_cols);
 
   std::vector<int> col_cost(total_cols);
   int total_cost = 0;
-#pragma omp parallel for reduction(+:total_cost) schedule(guided)
+#pragma omp parallel for reduction(+ : total_cost) schedule(guided)
   for (int j = 0; j < total_cols; ++j) {
     int cost = 0;
     for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
@@ -157,8 +159,8 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     }
     all_sizes.resize(total);
   }
-  MPI_Gatherv(local_sizes.data(), local_count, MPI_INT,
-              all_sizes.data(), counts.data(), displs_sizes.data(), MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(local_sizes.data(), local_count, MPI_INT, all_sizes.data(), counts.data(), displs_sizes.data(), MPI_INT,
+              0, MPI_COMM_WORLD);
 
   if (mpi_rank == 0) {
     size_t offset = 0;
@@ -174,7 +176,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   }
 
   size_t total_local_nnz = 0;
-#pragma omp parallel for reduction(+:total_local_nnz) schedule(guided)
+#pragma omp parallel for reduction(+ : total_local_nnz) schedule(guided)
   for (size_t j = 0; j < local_cols; ++j) {
     total_local_nnz += temp_rows[j].size();
   }
@@ -208,10 +210,10 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     }
   }
 
-  MPI_Gatherv(flat_rows.data(), local_nnz, MPI_UINT64_T,
-              c.row_indices.data(), recv_counts.data(), displs.data(), MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  MPI_Gatherv(flat_vals.data(), local_nnz, MPI_DOUBLE,
-              c.values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(flat_rows.data(), local_nnz, MPI_UINT64_T, c.row_indices.data(), recv_counts.data(), displs.data(),
+              MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(flat_vals.data(), local_nnz, MPI_DOUBLE, c.values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE,
+              0, MPI_COMM_WORLD);
 
   uint64_t nnz_tmp = 0;
   uint64_t cols_p1 = 0;
