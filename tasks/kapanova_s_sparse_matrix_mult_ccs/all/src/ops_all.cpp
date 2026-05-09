@@ -78,6 +78,152 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
   return ranges;
 }
 
+void ComputeLocalColumns(size_t start_col, size_t local_cols, const CCSMatrix &a, const CCSMatrix &b,
+                         std::vector<int> &local_sizes, std::vector<std::vector<size_t>> &temp_rows,
+                         std::vector<std::vector<double>> &temp_vals) {
+#pragma omp parallel default(none) shared(a, b, start_col, local_cols, temp_rows, temp_vals, local_sizes)
+  {
+    std::vector<double> accum(a.rows, 0.0);
+    std::vector<char> mask(a.rows, 0);
+    std::vector<size_t> active;
+    active.reserve(a.rows / 10);
+
+#pragma omp for schedule(guided, 32) nowait
+    for (size_t local_idx = 0; local_idx < local_cols; ++local_idx) {
+      size_t j = start_col + local_idx;
+
+      for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
+        size_t row_b = b.row_indices[k];
+        double val_b = b.values[k];
+        for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
+          size_t i = a.row_indices[zc];
+          double val_a = a.values[zc];
+          if (mask[i] == 0) {
+            mask[i] = 1;
+            active.push_back(i);
+            accum[i] = val_a * val_b;
+          } else {
+            accum[i] += val_a * val_b;
+          }
+        }
+      }
+
+      std::sort(active.begin(), active.end());
+      for (size_t i : active) {
+        if (accum[i] != 0.0) {
+          temp_rows[local_idx].push_back(i);
+          temp_vals[local_idx].push_back(accum[i]);
+        }
+        mask[i] = 0;
+        accum[i] = 0.0;
+      }
+      local_sizes[local_idx] = static_cast<int>(temp_rows[local_idx].size());
+      active.clear();
+    }
+  }
+}
+
+void PackLocalData(const std::vector<int> &local_sizes, const std::vector<std::vector<size_t>> &temp_rows,
+                   const std::vector<std::vector<double>> &temp_vals, std::vector<uint64_t> &send_rows,
+                   std::vector<double> &send_vals) {
+  size_t offset = 0;
+  for (size_t j = 0; j < local_sizes.size(); ++j) {
+    for (int k = 0; k < local_sizes[j]; ++k) {
+      send_rows[offset + k] = static_cast<uint64_t>(temp_rows[j][k]);
+      send_vals[offset + k] = temp_vals[j][k];
+    }
+    offset += static_cast<size_t>(local_sizes[j]);
+  }
+}
+
+void GatherColumnsSizes(int local_cols, const std::vector<int> &local_sizes, std::vector<int> &all_col_sizes,
+                        std::vector<size_t> &col_ptrs, int mpi_size) {
+  int local_count = static_cast<int>(local_cols);
+  std::vector<int> proc_counts(mpi_size);
+  std::vector<int> col_displs(mpi_size, 0);
+  MPI_Gather(&local_count, 1, MPI_INT, proc_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+  int total_cols_cnt = 0;
+  for (int proc = 0; proc < mpi_size; ++proc) {
+    col_displs[proc] = total_cols_cnt;
+    total_cols_cnt += proc_counts[proc];
+  }
+  all_col_sizes.resize(total_cols_cnt);
+
+  std::vector<int> send_col_counts(local_cols);
+  for (int j = 0; j < local_cols; ++j) {
+    send_col_counts[j] = local_sizes[j];
+  }
+
+  MPI_Gatherv(send_col_counts.data(), local_count, MPI_INT, all_col_sizes.data(), proc_counts.data(), col_displs.data(),
+              MPI_INT, 0, MPI_COMM_WORLD);
+
+  size_t off = 0;
+  for (size_t j = 0; j < col_ptrs.size() - 1; ++j) {
+    col_ptrs[j] = off;
+    off += static_cast<size_t>(all_col_sizes[j]);
+  }
+  col_ptrs.back() = off;
+}
+
+void GatherResults(int local_nnz, const std::vector<uint64_t> &send_rows, const std::vector<double> &send_vals,
+                   std::vector<size_t> &row_indices, std::vector<double> &values, int mpi_size) {
+  std::vector<int> recv_counts(mpi_size);
+  std::vector<int> displs(mpi_size, 0);
+  MPI_Gather(&local_nnz, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+  int total_nnz = 0;
+  for (int proc = 0; proc < mpi_size; ++proc) {
+    displs[proc] = total_nnz;
+    total_nnz += recv_counts[proc];
+  }
+
+  std::vector<uint64_t> tmp_rows(total_nnz);
+  std::vector<double> tmp_vals(total_nnz);
+
+  MPI_Gatherv(send_rows.data(), local_nnz, MPI_UINT64_T, tmp_rows.data(), recv_counts.data(), displs.data(),
+              MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, tmp_vals.data(), recv_counts.data(), displs.data(), MPI_DOUBLE,
+              0, MPI_COMM_WORLD);
+
+  row_indices.assign(tmp_rows.begin(), tmp_rows.end());
+  values.assign(tmp_vals.begin(), tmp_vals.end());
+}
+
+void BroadcastResult(OutType &c) {
+  auto nnz_tmp = static_cast<uint64_t>(c.nnz);
+  auto cols_p1 = static_cast<uint64_t>(c.cols + 1);
+  MPI_Bcast(&nnz_tmp, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&cols_p1, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+
+  std::vector<uint64_t> col_ptrs_tmp(cols_p1);
+  std::vector<uint64_t> row_indices_tmp(nnz_tmp);
+
+  int mpi_rank = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+
+  if (mpi_rank == 0) {
+    for (size_t i = 0; i < c.col_ptrs.size(); ++i) {
+      col_ptrs_tmp[i] = static_cast<uint64_t>(c.col_ptrs[i]);
+    }
+    for (size_t i = 0; i < c.row_indices.size(); ++i) {
+      row_indices_tmp[i] = static_cast<uint64_t>(c.row_indices[i]);
+    }
+  }
+
+  MPI_Bcast(col_ptrs_tmp.data(), static_cast<int>(cols_p1), MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(row_indices_tmp.data(), static_cast<int>(nnz_tmp), MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(c.values.data(), static_cast<int>(nnz_tmp), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+  if (mpi_rank != 0) {
+    c.cols = static_cast<int>(cols_p1 - 1);
+    c.nnz = nnz_tmp;
+    c.col_ptrs.assign(col_ptrs_tmp.begin(), col_ptrs_tmp.end());
+    c.row_indices.assign(row_indices_tmp.begin(), row_indices_tmp.end());
+    c.values.resize(c.nnz);
+  }
+}
+
 }  // namespace
 
 bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
@@ -109,134 +255,23 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   std::vector<std::vector<double>> temp_vals(local_cols);
 
   if (local_cols > 0) {
-#pragma omp parallel default(none) shared(a, b, start_col, local_cols, temp_rows, temp_vals, local_sizes)
-    {
-      std::vector<double> accum(a.rows, 0.0);
-      std::vector<char> mask(a.rows, 0);
-      std::vector<size_t> active;
-      active.reserve(a.rows / 10);
-
-#pragma omp for schedule(guided, 32) nowait
-      for (size_t local_idx = 0; local_idx < local_cols; ++local_idx) {
-        size_t j = start_col + local_idx;
-
-        for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
-          size_t row_b = b.row_indices[k];
-          double val_b = b.values[k];
-          for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
-            size_t i = a.row_indices[zc];
-            double val_a = a.values[zc];
-            if (mask[i] == 0) {
-              mask[i] = 1;
-              active.push_back(i);
-              accum[i] = val_a * val_b;
-            } else {
-              accum[i] += val_a * val_b;
-            }
-          }
-        }
-
-        std::sort(active.begin(), active.end());
-        for (size_t i : active) {
-          if (accum[i] != 0.0) {
-            temp_rows[local_idx].push_back(i);
-            temp_vals[local_idx].push_back(accum[i]);
-          }
-          mask[i] = 0;
-          accum[i] = 0.0;
-        }
-        local_sizes[local_idx] = static_cast<int>(temp_rows[local_idx].size());
-        active.clear();
-      }
-    }
+    ComputeLocalColumns(start_col, local_cols, a, b, local_sizes, temp_rows, temp_vals);
   }
 
   int local_nnz = std::accumulate(local_sizes.begin(), local_sizes.end(), 0);
 
   std::vector<uint64_t> send_rows(local_nnz);
   std::vector<double> send_vals(local_nnz);
+  PackLocalData(local_sizes, temp_rows, temp_vals, send_rows, send_vals);
 
-  size_t offset = 0;
-  for (size_t j = 0; j < local_cols; ++j) {
-    for (int k = 0; k < local_sizes[j]; ++k) {
-      send_rows[offset + k] = static_cast<uint64_t>(temp_rows[j][k]);
-      send_vals[offset + k] = temp_vals[j][k];
-    }
-    offset += static_cast<size_t>(local_sizes[j]);
-  }
-
-  std::vector<int> recv_counts(mpi_size);
-  std::vector<int> displs(mpi_size, 0);
-  MPI_Gather(&local_nnz, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-  int total_nnz = 0;
-  if (mpi_rank == 0) {
-    for (int proc = 0; proc < mpi_size; ++proc) {
-      displs[proc] = total_nnz;
-      total_nnz += recv_counts[proc];
-    }
-    c.nnz = static_cast<size_t>(total_nnz);
-    c.values.resize(c.nnz);
-    c.row_indices.resize(c.nnz);
-    c.col_ptrs.resize(c.cols + 1);
-  }
-
-  MPI_Gatherv(send_rows.data(), local_nnz, MPI_UINT64_T, c.row_indices.data(), recv_counts.data(), displs.data(),
-              MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, c.values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE,
-              0, MPI_COMM_WORLD);
-
-  std::vector<int> send_col_counts(local_cols);
-  for (size_t j = 0; j < local_cols; ++j) {
-    send_col_counts[j] = local_sizes[j];
-  }
-
-  int local_count = static_cast<int>(local_cols);
-  std::vector<int> proc_counts(mpi_size);
-  std::vector<int> col_displs(mpi_size, 0);
-  MPI_Gather(&local_count, 1, MPI_INT, proc_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+  c.col_ptrs.resize(c.cols + 1);
+  GatherResults(local_nnz, send_rows, send_vals, c.row_indices, c.values, mpi_size);
+  c.nnz = c.row_indices.size();
 
   std::vector<int> all_col_sizes;
-  if (mpi_rank == 0) {
-    int total_cols_cnt = 0;
-    for (int proc = 0; proc < mpi_size; ++proc) {
-      col_displs[proc] = total_cols_cnt;
-      total_cols_cnt += proc_counts[proc];
-    }
-    all_col_sizes.resize(total_cols_cnt);
-  }
+  GatherColumnsSizes(static_cast<int>(local_cols), local_sizes, all_col_sizes, c.col_ptrs, mpi_size);
 
-  MPI_Gatherv(send_col_counts.data(), local_count, MPI_INT, all_col_sizes.data(), proc_counts.data(), col_displs.data(),
-              MPI_INT, 0, MPI_COMM_WORLD);
-
-  if (mpi_rank == 0) {
-    size_t off = 0;
-    for (size_t j = 0; j < static_cast<size_t>(c.cols); ++j) {
-      c.col_ptrs[j] = off;
-      off += static_cast<size_t>(all_col_sizes[j]);
-    }
-    c.col_ptrs[c.cols] = off;
-  }
-
-  auto nnz_tmp = static_cast<uint64_t>(c.nnz);
-  auto cols_p1 = static_cast<uint64_t>(c.cols + 1);
-  MPI_Bcast(&nnz_tmp, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&cols_p1, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-
-  if (mpi_rank != 0) {
-    c.col_ptrs.resize(cols_p1);
-  }
-  MPI_Bcast(c.col_ptrs.data(), static_cast<int>(cols_p1), MPI_UINT64_T, 0, MPI_COMM_WORLD);
-
-  if (mpi_rank != 0) {
-    c.cols = static_cast<int>(cols_p1 - 1);
-    c.nnz = nnz_tmp;
-    c.row_indices.resize(c.nnz);
-    c.values.resize(c.nnz);
-  }
-
-  MPI_Bcast(c.row_indices.data(), static_cast<int>(c.nnz), MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  MPI_Bcast(c.values.data(), static_cast<int>(c.nnz), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  BroadcastResult(c);
 
   MPI_Barrier(MPI_COMM_WORLD);
   return true;
