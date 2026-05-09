@@ -34,7 +34,6 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 
 namespace {
 
-// NOLINTNEXTLINE
 std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<size_t> ranges(num_procs + 1, 0);
   ranges[num_procs] = static_cast<size_t>(total_cols);
@@ -46,13 +45,13 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
   std::vector<int> col_cost(total_cols);
   int total_cost = 0;
 #pragma omp parallel for reduction(+ : total_cost) schedule(guided) default(none) shared(a, b, col_cost, total_cols)
-  for (int j = 0; j < total_cols; ++j) {
+  for (int col = 0; col < total_cols; ++col) {
     int cost = 0;
-    for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
+    for (size_t k = b.col_ptrs[col]; k < b.col_ptrs[col + 1]; ++k) {
       size_t row_b = b.row_indices[k];
       cost += static_cast<int>(a.col_ptrs[row_b + 1] - a.col_ptrs[row_b]);
     }
-    col_cost[j] = cost;
+    col_cost[col] = cost;
     total_cost += cost;
   }
 
@@ -80,7 +79,6 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
 
 }  // namespace
 
-// NOLINTNEXTLINE
 bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   const auto &a = std::get<0>(GetInput());
   const auto &b = std::get<1>(GetInput());
@@ -172,9 +170,9 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
 
   int total_nnz = 0;
   if (mpi_rank == 0) {
-    for (int i = 0; i < mpi_size; ++i) {
-      displs[i] = total_nnz;
-      total_nnz += recv_counts[i];
+    for (int proc = 0; proc < mpi_size; ++proc) {
+      displs[proc] = total_nnz;
+      total_nnz += recv_counts[proc];
     }
     c.nnz = static_cast<size_t>(total_nnz);
     c.values.resize(c.nnz);
@@ -200,9 +198,9 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   std::vector<int> all_col_sizes;
   if (mpi_rank == 0) {
     int total_cols_cnt = 0;
-    for (int i = 0; i < mpi_size; ++i) {
-      col_displs[i] = total_cols_cnt;
-      total_cols_cnt += proc_counts[i];
+    for (int proc = 0; proc < mpi_size; ++proc) {
+      col_displs[proc] = total_cols_cnt;
+      total_cols_cnt += proc_counts[proc];
     }
     all_col_sizes.resize(total_cols_cnt);
   }
