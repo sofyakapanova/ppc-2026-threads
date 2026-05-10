@@ -5,8 +5,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <numeric>
-#include <utility>
 #include <vector>
 
 #include "kapanova_s_sparse_matrix_mult_ccs/common/include/common.hpp"
@@ -63,11 +61,40 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
     ranges[proc] = static_cast<size_t>(current_col);
   }
   for (int proc = num_procs - 1; proc > 0; --proc) {
-    if (ranges[proc] == ranges[proc - 1] && std::cmp_less(ranges[proc], total_cols)) {
+    if (ranges[proc] == ranges[proc - 1] && static_cast<int>(ranges[proc]) < total_cols) {
       ranges[proc]++;
     }
   }
   return ranges;
+}
+
+void ProcessColumn(size_t j, const CCSMatrix &a, const CCSMatrix &b, std::vector<size_t> &out_rows,
+                   std::vector<double> &out_vals, double *accum, char *mask, size_t *active, int &active_count) {
+  for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
+    size_t row_b = b.row_indices[k];
+    double val_b = b.values[k];
+    for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
+      size_t i = a.row_indices[zc];
+      double val_a = a.values[zc];
+      if (mask[i] == 0) {
+        mask[i] = 1;
+        active[active_count++] = i;
+        accum[i] = val_a * val_b;
+      } else {
+        accum[i] += val_a * val_b;
+      }
+    }
+  }
+  std::sort(active, active + active_count);
+  for (int idx = 0; idx < active_count; ++idx) {
+    size_t i = active[idx];
+    if (accum[i] != 0.0) {
+      out_rows.push_back(i);
+      out_vals.push_back(accum[i]);
+    }
+    mask[i] = 0;
+    accum[i] = 0.0;
+  }
 }
 
 void ComputeLocalColumns(size_t start_col, size_t local_cols, const CCSMatrix &a, const CCSMatrix &b,
@@ -77,37 +104,15 @@ void ComputeLocalColumns(size_t start_col, size_t local_cols, const CCSMatrix &a
   {
     std::vector<double> accum(a.rows, 0.0);
     std::vector<char> mask(a.rows, 0);
-    std::vector<size_t> active;
-    active.reserve(a.rows / 10);
+    std::vector<size_t> active(a.rows);
+    int active_count = 0;
 #pragma omp for schedule(guided, 32) nowait
     for (size_t local_idx = 0; local_idx < local_cols; ++local_idx) {
       size_t j = start_col + local_idx;
-      for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
-        size_t row_b = b.row_indices[k];
-        double val_b = b.values[k];
-        for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
-          size_t i = a.row_indices[zc];
-          double val_a = a.values[zc];
-          if (mask[i] == 0) {
-            mask[i] = 1;
-            active.push_back(i);
-            accum[i] = val_a * val_b;
-          } else {
-            accum[i] += val_a * val_b;
-          }
-        }
-      }
-      std::sort(active.begin(), active.end());
-      for (size_t i : active) {
-        if (accum[i] != 0.0) {
-          temp_rows[local_idx].push_back(i);
-          temp_vals[local_idx].push_back(accum[i]);
-        }
-        mask[i] = 0;
-        accum[i] = 0.0;
-      }
+      active_count = 0;
+      ProcessColumn(j, a, b, temp_rows[local_idx], temp_vals[local_idx], accum.data(), mask.data(), active.data(),
+                    active_count);
       local_sizes[local_idx] = static_cast<int>(temp_rows[local_idx].size());
-      active.clear();
     }
   }
 }
@@ -165,12 +170,12 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
 
   std::vector<int> displs(mpi_size, 0);
   if (mpi_rank == 0) {
-    int total_nnz = 0;
+    size_t total_nnz = 0;
     for (int proc = 0; proc < mpi_size; ++proc) {
-      displs[proc] = total_nnz;
-      total_nnz += recv_counts[proc];
+      displs[proc] = static_cast<int>(total_nnz);
+      total_nnz += static_cast<size_t>(recv_counts[proc]);
     }
-    c.nnz = static_cast<size_t>(total_nnz);
+    c.nnz = total_nnz;
     c.row_indices.resize(c.nnz);
     c.values.resize(c.nnz);
     c.col_ptrs.resize(c.cols + 1);
@@ -207,8 +212,8 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     c.col_ptrs[c.cols] = off;
   }
 
-  unsigned long nnz_bcast = static_cast<unsigned long>(c.nnz);
-  unsigned long cols_bcast = static_cast<unsigned long>(c.cols + 1);
+  auto nnz_bcast = static_cast<size_t>(c.nnz);
+  auto cols_bcast = static_cast<size_t>(c.cols + 1);
   MPI_Bcast(&nnz_bcast, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
   MPI_Bcast(&cols_bcast, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
 
