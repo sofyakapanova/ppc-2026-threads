@@ -158,7 +158,6 @@ void PackAndGather(const std::vector<int> &local_sizes, size_t local_cols,
 void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_indices, std::vector<double> &values,
                         size_t &nnz, int &cols, const std::vector<int> &local_sizes, size_t local_cols, int mpi_rank,
                         int mpi_size) {
-  int cols_local = cols;
   int local_count = static_cast<int>(local_cols);
   std::vector<int> proc_counts(mpi_size);
   MPI_Gather(&local_count, 1, MPI_INT, proc_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -171,20 +170,20 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
       total_cols_cnt += proc_counts[proc];
     }
     all_col_sizes.resize(total_cols_cnt);
-    col_ptrs.resize(cols_local + 1);
+    col_ptrs.resize(static_cast<size_t>(cols) + 1);
   }
   MPI_Gatherv(local_sizes.data(), local_count, MPI_INT, all_col_sizes.data(), proc_counts.data(), col_displs.data(),
               MPI_INT, 0, MPI_COMM_WORLD);
   if (mpi_rank == 0) {
     size_t off = 0;
-    for (int j = 0; j < cols_local; ++j) {
+    for (size_t j = 0; j < static_cast<size_t>(cols); ++j) {
       col_ptrs[j] = off;
       off += static_cast<size_t>(all_col_sizes[j]);
     }
-    col_ptrs[cols_local] = off;
+    col_ptrs[static_cast<size_t>(cols)] = off;
   }
-  auto nnz_bcast = static_cast<size_t>(nnz);
-  auto cols_bcast = static_cast<size_t>(cols_local + 1);
+  auto nnz_bcast = nnz;
+  auto cols_bcast = static_cast<size_t>(cols) + 1;
   MPI_Bcast(&nnz_bcast, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
   MPI_Bcast(&cols_bcast, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
   if (mpi_rank != 0) {
@@ -231,7 +230,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     ComputeLocalColumns(start_col, local_cols, a, b, local_sizes, temp_rows, temp_vals);
   }
 
-  size_t nnz_tmp = c.nnz;
+  size_t nnz_tmp = 0;
   int cols_tmp = c.cols;
 
   PackAndGather(local_sizes, local_cols, temp_rows, temp_vals, c.row_indices, c.values, nnz_tmp, mpi_rank, mpi_size);
