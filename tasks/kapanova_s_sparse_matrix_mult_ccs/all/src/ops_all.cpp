@@ -70,7 +70,7 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
   }
 
   for (int proc = num_procs - 1; proc > 0; --proc) {
-    if (ranges[proc] == ranges[proc - 1] && static_cast<int>(ranges[proc]) < total_cols) {
+    if (ranges[proc] == ranges[proc - 1] && std::cmp_less(ranges[proc], total_cols)) {
       ranges[proc]++;
     }
   }
@@ -176,8 +176,8 @@ void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &valu
               MPI_COMM_WORLD);
 }
 
-void GatherColPtrs(std::vector<size_t> &col_ptrs, int total_cols, const std::vector<int> &local_sizes, int local_count,
-                   int mpi_rank, int mpi_size) {
+void GatherColPtrs(std::vector<size_t> &col_ptrs, size_t total_cols, const std::vector<int> &local_sizes,
+                   int local_count, int mpi_rank, int mpi_size) {
   std::vector<int> proc_counts(mpi_size);
   MPI_Gather(&local_count, 1, MPI_INT, proc_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -198,7 +198,7 @@ void GatherColPtrs(std::vector<size_t> &col_ptrs, int total_cols, const std::vec
 
   if (mpi_rank == 0) {
     size_t off = 0;
-    for (int j = 0; j < total_cols; ++j) {
+    for (size_t j = 0; j < total_cols; ++j) {
       col_ptrs[j] = off;
       off += static_cast<size_t>(all_col_sizes[j]);
     }
@@ -206,7 +206,7 @@ void GatherColPtrs(std::vector<size_t> &col_ptrs, int total_cols, const std::vec
   }
 }
 
-void BroadcastResult(int total_cols, size_t nnz, std::vector<size_t> &col_ptrs, std::vector<size_t> &row_indices,
+void BroadcastResult(size_t total_cols, size_t nnz, std::vector<size_t> &col_ptrs, std::vector<size_t> &row_indices,
                      std::vector<double> &values, int root) {
   int mpi_rank = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
@@ -278,9 +278,9 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
 
   GatherRowValues(c.row_indices, c.values, c.nnz, send_rows, send_vals, local_nnz, mpi_rank, mpi_size);
 
-  GatherColPtrs(c.col_ptrs, c.cols, local_sizes, static_cast<int>(local_cols), mpi_rank, mpi_size);
+  GatherColPtrs(c.col_ptrs, static_cast<size_t>(c.cols), local_sizes, static_cast<int>(local_cols), mpi_rank, mpi_size);
 
-  BroadcastResult(c.cols, c.nnz, c.col_ptrs, c.row_indices, c.values, 0);
+  BroadcastResult(static_cast<size_t>(c.cols), c.nnz, c.col_ptrs, c.row_indices, c.values, 0);
 
   if (mpi_rank != 0) {
     c.cols = static_cast<int>(c.col_ptrs.size() - 1);
