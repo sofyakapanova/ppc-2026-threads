@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -33,8 +34,6 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 }
 
 namespace {
-
-using ULong = unsigned long;
 
 std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<size_t> ranges(num_procs + 1, 0);
@@ -71,7 +70,7 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
   }
 
   for (int proc = num_procs - 1; proc > 0; --proc) {
-    if (ranges[proc] == ranges[proc - 1] && std::cmp_less(ranges[proc], total_cols)) {
+    if (ranges[proc] == ranges[proc - 1] && static_cast<int>(ranges[proc]) < total_cols) {
       ranges[proc]++;
     }
   }
@@ -134,9 +133,9 @@ void DistributeRanges(std::vector<size_t> &ranges, int total_cols, int mpi_size,
   if (mpi_rank == 0) {
     ranges = ComputeBalancedRanges(total_cols, mpi_size, a, b);
   }
-  std::vector<ULong> ranges_ul(ranges.begin(), ranges.end());
-  MPI_Bcast(ranges_ul.data(), mpi_size + 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-  ranges.assign(ranges_ul.begin(), ranges_ul.end());
+  std::vector<uint64_t> ranges_u64(ranges.begin(), ranges.end());
+  MPI_Bcast(ranges_u64.data(), mpi_size + 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  ranges.assign(ranges_u64.begin(), ranges_u64.end());
 }
 
 void PackSendData(const std::vector<int> &local_sizes, size_t local_cols,
@@ -170,9 +169,9 @@ void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &valu
     values.resize(nnz);
   }
 
-  std::vector<ULong> send_rows_ul(send_rows.begin(), send_rows.end());
-  MPI_Gatherv(send_rows_ul.data(), local_nnz, MPI_UNSIGNED_LONG, row_indices.data(), recv_counts.data(), displs.data(),
-              MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+  std::vector<uint64_t> send_rows_u64(send_rows.begin(), send_rows.end());
+  MPI_Gatherv(send_rows_u64.data(), local_nnz, MPI_UINT64_T, row_indices.data(), recv_counts.data(), displs.data(),
+              MPI_UINT64_T, 0, MPI_COMM_WORLD);
   MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0,
               MPI_COMM_WORLD);
 }
@@ -212,33 +211,33 @@ void BroadcastResult(int total_cols, size_t nnz, std::vector<size_t> &col_ptrs, 
   int mpi_rank = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
-  auto nnz_ul = static_cast<ULong>(nnz);
-  auto cols_p1 = static_cast<ULong>(total_cols + 1);
-  MPI_Bcast(&nnz_ul, 1, MPI_UNSIGNED_LONG, root, MPI_COMM_WORLD);
-  MPI_Bcast(&cols_p1, 1, MPI_UNSIGNED_LONG, root, MPI_COMM_WORLD);
+  auto nnz_u64 = static_cast<uint64_t>(nnz);
+  auto cols_p1 = static_cast<uint64_t>(total_cols + 1);
+  MPI_Bcast(&nnz_u64, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
+  MPI_Bcast(&cols_p1, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
 
-  std::vector<ULong> cp_tmp(cols_p1);
-  std::vector<ULong> ri_tmp(nnz_ul);
+  std::vector<uint64_t> cp_tmp(cols_p1);
+  std::vector<uint64_t> ri_tmp(nnz_u64);
 
   if (mpi_rank == root) {
     for (size_t i = 0; i < col_ptrs.size(); ++i) {
-      cp_tmp[i] = static_cast<ULong>(col_ptrs[i]);
+      cp_tmp[i] = static_cast<uint64_t>(col_ptrs[i]);
     }
     for (size_t i = 0; i < row_indices.size(); ++i) {
-      ri_tmp[i] = static_cast<ULong>(row_indices[i]);
+      ri_tmp[i] = static_cast<uint64_t>(row_indices[i]);
     }
   }
 
-  MPI_Bcast(cp_tmp.data(), static_cast<int>(cols_p1), MPI_UNSIGNED_LONG, root, MPI_COMM_WORLD);
-  MPI_Bcast(ri_tmp.data(), static_cast<int>(nnz_ul), MPI_UNSIGNED_LONG, root, MPI_COMM_WORLD);
+  MPI_Bcast(cp_tmp.data(), static_cast<int>(cols_p1), MPI_UINT64_T, root, MPI_COMM_WORLD);
+  MPI_Bcast(ri_tmp.data(), static_cast<int>(nnz_u64), MPI_UINT64_T, root, MPI_COMM_WORLD);
 
   if (mpi_rank != root) {
     col_ptrs.assign(cp_tmp.begin(), cp_tmp.end());
     row_indices.assign(ri_tmp.begin(), ri_tmp.end());
-    values.resize(nnz_ul);
+    values.resize(nnz_u64);
   }
 
-  MPI_Bcast(values.data(), static_cast<int>(nnz_ul), MPI_DOUBLE, root, MPI_COMM_WORLD);
+  MPI_Bcast(values.data(), static_cast<int>(nnz_u64), MPI_DOUBLE, root, MPI_COMM_WORLD);
 }
 
 }  // namespace
