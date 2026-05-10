@@ -176,11 +176,12 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
               MPI_INT, 0, MPI_COMM_WORLD);
   if (mpi_rank == 0) {
     size_t off = 0;
-    for (size_t j = 0; j < static_cast<size_t>(cols); ++j) {
+    size_t cols_sz = static_cast<size_t>(cols);
+    for (size_t j = 0; j < cols_sz; ++j) {
       col_ptrs[j] = off;
       off += static_cast<size_t>(all_col_sizes[j]);
     }
-    col_ptrs[static_cast<size_t>(cols)] = off;
+    col_ptrs[cols_sz] = off;
   }
   auto nnz_bcast = nnz;
   auto cols_bcast = static_cast<size_t>(cols) + 1;
