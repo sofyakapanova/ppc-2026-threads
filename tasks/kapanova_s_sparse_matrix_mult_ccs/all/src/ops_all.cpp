@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -33,6 +32,8 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 }
 
 namespace {
+
+using MpiInt = unsigned long long;
 
 std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<size_t> ranges(num_procs + 1, 0);
@@ -127,12 +128,12 @@ void PackAndGather(const std::vector<int> &local_sizes, size_t local_cols,
   for (size_t j = 0; j < local_cols; ++j) {
     local_nnz += local_sizes[j];
   }
-  std::vector<uint64_t> send_rows(local_nnz);
+  std::vector<MpiInt> send_rows(local_nnz);
   std::vector<double> send_vals(local_nnz);
   size_t offset = 0;
   for (size_t j = 0; j < local_cols; ++j) {
     for (int k = 0; k < local_sizes[j]; ++k) {
-      send_rows[offset + k] = static_cast<uint64_t>(temp_rows[j][k]);
+      send_rows[offset + k] = static_cast<MpiInt>(temp_rows[j][k]);
       send_vals[offset + k] = temp_vals[j][k];
     }
     offset += static_cast<size_t>(local_sizes[j]);
@@ -150,9 +151,9 @@ void PackAndGather(const std::vector<int> &local_sizes, size_t local_cols,
     row_indices.resize(nnz);
     values.resize(nnz);
   }
-  std::vector<uint64_t> recv_rows(nnz);
-  MPI_Gatherv(send_rows.data(), local_nnz, MPI_UINT64_T, recv_rows.data(), recv_counts.data(), displs.data(),
-              MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  std::vector<MpiInt> recv_rows(nnz);
+  MPI_Gatherv(send_rows.data(), local_nnz, MPI_UNSIGNED_LONG_LONG, recv_rows.data(), recv_counts.data(), displs.data(),
+              MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
   MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0,
               MPI_COMM_WORLD);
   if (mpi_rank == 0) {
@@ -190,22 +191,22 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
     }
     col_ptrs[cols_sz] = off;
   }
-  auto nnz_bcast = static_cast<uint64_t>(nnz);
-  auto cols_bcast = static_cast<uint64_t>(cols) + 1;
-  MPI_Bcast(&nnz_bcast, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&cols_bcast, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  std::vector<uint64_t> cp_tmp(cols_bcast);
-  std::vector<uint64_t> ri_tmp(nnz_bcast);
+  auto nnz_bcast = static_cast<MpiInt>(nnz);
+  auto cols_bcast = static_cast<MpiInt>(cols) + 1;
+  MPI_Bcast(&nnz_bcast, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&cols_bcast, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+  std::vector<MpiInt> cp_tmp(cols_bcast);
+  std::vector<MpiInt> ri_tmp(nnz_bcast);
   if (mpi_rank == 0) {
     for (size_t i = 0; i < col_ptrs.size(); ++i) {
-      cp_tmp[i] = static_cast<uint64_t>(col_ptrs[i]);
+      cp_tmp[i] = static_cast<MpiInt>(col_ptrs[i]);
     }
     for (size_t i = 0; i < row_indices.size(); ++i) {
-      ri_tmp[i] = static_cast<uint64_t>(row_indices[i]);
+      ri_tmp[i] = static_cast<MpiInt>(row_indices[i]);
     }
   }
-  MPI_Bcast(cp_tmp.data(), static_cast<int>(cols_bcast), MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  MPI_Bcast(ri_tmp.data(), static_cast<int>(nnz_bcast), MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(cp_tmp.data(), static_cast<int>(cols_bcast), MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+  MPI_Bcast(ri_tmp.data(), static_cast<int>(nnz_bcast), MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
   if (mpi_rank != 0) {
     cols = static_cast<int>(cols_bcast - 1);
     nnz = nnz_bcast;
