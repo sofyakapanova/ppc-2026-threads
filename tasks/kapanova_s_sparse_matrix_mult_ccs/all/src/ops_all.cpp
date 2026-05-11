@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -21,15 +22,12 @@ bool KapanovaSSparseMatrixMultCCSALL::ValidationImpl() {
   const auto &a = std::get<0>(GetInput());
   const auto &b = std::get<1>(GetInput());
   return (a.cols == b.rows && a.rows > 0 && a.cols > 0 && b.rows > 0 && b.cols > 0 &&
-          a.col_ptrs.size() == static_cast<size_t>(a.cols + 1) && b.col_ptrs.size() == static_cast<size_t>(b.cols + 1));
+          a.col_ptrs.size() == static_cast<size_t>(a.cols + 1) &&
+          b.col_ptrs.size() == static_cast<size_t>(b.cols + 1));
 }
 
-bool KapanovaSSparseMatrixMultCCSALL::PreProcessingImpl() {
-  return true;
-}
-bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
-  return true;
-}
+bool KapanovaSSparseMatrixMultCCSALL::PreProcessingImpl() { return true; }
+bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() { return true; }
 
 namespace {
 
@@ -69,8 +67,9 @@ std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const C
   return ranges;
 }
 
-void ProcessColumn(size_t j, const CCSMatrix &a, const CCSMatrix &b, std::vector<size_t> &out_rows,
-                   std::vector<double> &out_vals, double *accum, char *mask, size_t *active, int &active_count) {
+void ProcessColumn(size_t j, const CCSMatrix &a, const CCSMatrix &b,
+                   std::vector<size_t> &out_rows, std::vector<double> &out_vals,
+                   double *accum, char *mask, size_t *active, int &active_count) {
   for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
     size_t row_b = b.row_indices[k];
     double val_b = b.values[k];
@@ -111,27 +110,28 @@ void ComputeLocalColumns(size_t start_col, size_t local_cols, const CCSMatrix &a
     for (size_t local_idx = 0; local_idx < local_cols; ++local_idx) {
       size_t j = start_col + local_idx;
       active_count = 0;
-      ProcessColumn(j, a, b, temp_rows[local_idx], temp_vals[local_idx], accum.data(), mask.data(), active.data(),
-                    active_count);
+      ProcessColumn(j, a, b, temp_rows[local_idx], temp_vals[local_idx],
+                    accum.data(), mask.data(), active.data(), active_count);
       local_sizes[local_idx] = static_cast<int>(temp_rows[local_idx].size());
     }
   }
 }
 
 void PackAndGather(const std::vector<int> &local_sizes, size_t local_cols,
-                   const std::vector<std::vector<size_t>> &temp_rows, const std::vector<std::vector<double>> &temp_vals,
-                   std::vector<size_t> &row_indices, std::vector<double> &values, size_t &nnz, int mpi_rank,
-                   int mpi_size) {
+                   const std::vector<std::vector<size_t>> &temp_rows,
+                   const std::vector<std::vector<double>> &temp_vals,
+                   std::vector<size_t> &row_indices, std::vector<double> &values,
+                   size_t &nnz, int mpi_rank, int mpi_size) {
   int local_nnz = 0;
   for (size_t j = 0; j < local_cols; ++j) {
     local_nnz += local_sizes[j];
   }
-  std::vector<size_t> send_rows(local_nnz);
+  std::vector<uint64_t> send_rows(local_nnz);
   std::vector<double> send_vals(local_nnz);
   size_t offset = 0;
   for (size_t j = 0; j < local_cols; ++j) {
     for (int k = 0; k < local_sizes[j]; ++k) {
-      send_rows[offset + k] = temp_rows[j][k];
+      send_rows[offset + k] = static_cast<uint64_t>(temp_rows[j][k]);
       send_vals[offset + k] = temp_vals[j][k];
     }
     offset += static_cast<size_t>(local_sizes[j]);
@@ -149,15 +149,22 @@ void PackAndGather(const std::vector<int> &local_sizes, size_t local_cols,
     row_indices.resize(nnz);
     values.resize(nnz);
   }
-  MPI_Gatherv(send_rows.data(), local_nnz, MPI_UNSIGNED_LONG, row_indices.data(), recv_counts.data(), displs.data(),
-              MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-  MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0,
-              MPI_COMM_WORLD);
+  std::vector<uint64_t> recv_rows(nnz);
+  MPI_Gatherv(send_rows.data(), local_nnz, MPI_UINT64_T,
+              recv_rows.data(), recv_counts.data(), displs.data(), MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE,
+              values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  if (mpi_rank == 0) {
+    for (size_t i = 0; i < nnz; ++i) {
+      row_indices[i] = recv_rows[i];
+    }
+  }
 }
 
-void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_indices, std::vector<double> &values,
-                        size_t &nnz, int &cols, const std::vector<int> &local_sizes, size_t local_cols, int mpi_rank,
-                        int mpi_size) {
+void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_indices,
+                        std::vector<double> &values, size_t &nnz, int &cols,
+                        const std::vector<int> &local_sizes, size_t local_cols,
+                        int mpi_rank, int mpi_size) {
   int local_count = static_cast<int>(local_cols);
   std::vector<int> proc_counts(mpi_size);
   MPI_Gather(&local_count, 1, MPI_INT, proc_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -172,8 +179,8 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
     all_col_sizes.resize(total_cols_cnt);
     col_ptrs.resize(static_cast<size_t>(cols) + 1);
   }
-  MPI_Gatherv(local_sizes.data(), local_count, MPI_INT, all_col_sizes.data(), proc_counts.data(), col_displs.data(),
-              MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(local_sizes.data(), local_count, MPI_INT,
+              all_col_sizes.data(), proc_counts.data(), col_displs.data(), MPI_INT, 0, MPI_COMM_WORLD);
   if (mpi_rank == 0) {
     size_t off = 0;
     auto cols_sz = static_cast<size_t>(cols);
@@ -183,19 +190,29 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
     }
     col_ptrs[cols_sz] = off;
   }
-  auto nnz_bcast = nnz;
-  auto cols_bcast = static_cast<size_t>(cols) + 1;
-  MPI_Bcast(&nnz_bcast, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&cols_bcast, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+  auto nnz_bcast = static_cast<uint64_t>(nnz);
+  auto cols_bcast = static_cast<uint64_t>(cols) + 1;
+  MPI_Bcast(&nnz_bcast, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&cols_bcast, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  std::vector<uint64_t> cp_tmp(cols_bcast);
+  std::vector<uint64_t> ri_tmp(nnz_bcast);
+  if (mpi_rank == 0) {
+    for (size_t i = 0; i < col_ptrs.size(); ++i) {
+      cp_tmp[i] = static_cast<uint64_t>(col_ptrs[i]);
+    }
+    for (size_t i = 0; i < row_indices.size(); ++i) {
+      ri_tmp[i] = static_cast<uint64_t>(row_indices[i]);
+    }
+  }
+  MPI_Bcast(cp_tmp.data(), static_cast<int>(cols_bcast), MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(ri_tmp.data(), static_cast<int>(nnz_bcast), MPI_UINT64_T, 0, MPI_COMM_WORLD);
   if (mpi_rank != 0) {
     cols = static_cast<int>(cols_bcast - 1);
     nnz = nnz_bcast;
-    col_ptrs.resize(cols_bcast);
-    row_indices.resize(nnz);
+    col_ptrs.assign(cp_tmp.begin(), cp_tmp.end());
+    row_indices.assign(ri_tmp.begin(), ri_tmp.end());
     values.resize(nnz);
   }
-  MPI_Bcast(col_ptrs.data(), static_cast<int>(cols_bcast), MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-  MPI_Bcast(row_indices.data(), static_cast<int>(nnz_bcast), MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
   MPI_Bcast(values.data(), static_cast<int>(nnz_bcast), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 }
 
@@ -234,10 +251,11 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   size_t nnz_tmp = 0;
   int cols_tmp = static_cast<int>(c.cols);
 
-  PackAndGather(local_sizes, local_cols, temp_rows, temp_vals, c.row_indices, c.values, nnz_tmp, mpi_rank, mpi_size);
+  PackAndGather(local_sizes, local_cols, temp_rows, temp_vals,
+                c.row_indices, c.values, nnz_tmp, mpi_rank, mpi_size);
 
-  GatherAndBroadcast(c.col_ptrs, c.row_indices, c.values, nnz_tmp, cols_tmp, local_sizes, local_cols, mpi_rank,
-                     mpi_size);
+  GatherAndBroadcast(c.col_ptrs, c.row_indices, c.values, nnz_tmp, cols_tmp,
+                     local_sizes, local_cols, mpi_rank, mpi_size);
 
   c.nnz = nnz_tmp;
   c.cols = cols_tmp;
