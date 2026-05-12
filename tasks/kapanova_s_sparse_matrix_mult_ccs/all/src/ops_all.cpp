@@ -160,7 +160,7 @@ void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &valu
     nnz = total;
     values.resize(nnz);
   }
-  std::vector<MpiSizeT> tmp_rows(total);
+  std::vector<MpiSizeT> tmp_rows(mpi_rank == 0 ? total : 1);
   MPI_Gatherv(send_rows.data(), local_nnz, kMpiSizeT, tmp_rows.data(), recv_counts.data(), displs.data(), kMpiSizeT, 0,
               MPI_COMM_WORLD);
   MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0,
@@ -203,8 +203,8 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
   auto cols_bcast = static_cast<MpiSizeT>(cols) + 1;
   MPI_Bcast(&nnz_bcast, 1, kMpiSizeT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&cols_bcast, 1, kMpiSizeT, 0, MPI_COMM_WORLD);
-  std::vector<MpiSizeT> cp_tmp(cols_bcast);
-  std::vector<MpiSizeT> ri_tmp(nnz_bcast);
+  std::vector<MpiSizeT> cp_tmp(mpi_rank == 0 ? cols_bcast : 1);
+  std::vector<MpiSizeT> ri_tmp(mpi_rank == 0 ? nnz_bcast : 1);
   if (mpi_rank == 0) {
     for (size_t i = 0; i < col_ptrs.size(); ++i) {
       cp_tmp[i] = static_cast<MpiSizeT>(col_ptrs[i]);
