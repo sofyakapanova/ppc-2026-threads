@@ -241,7 +241,6 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   }
   MPI_Bcast(ranges_u64.data(), mpi_size + 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
   std::vector<size_t> ranges(ranges_u64.begin(), ranges_u64.end());
-  ranges.assign(ranges_u64.begin(), ranges_u64.end());
 
   size_t start_col = ranges[mpi_rank];
   size_t local_cols = ranges[mpi_rank + 1] - start_col;
