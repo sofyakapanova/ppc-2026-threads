@@ -232,12 +232,15 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
 
-  std::vector<size_t> ranges(mpi_size + 1);
+  std::vector<uint64_t> ranges_u64(mpi_size + 1);
   if (mpi_rank == 0) {
-    ranges = ComputeBalancedRanges(static_cast<int>(c.cols), mpi_size, a, b);
+    auto raw = ComputeBalancedRanges(static_cast<int>(c.cols), mpi_size, a, b);
+    for (int i = 0; i <= mpi_size; ++i) {
+      ranges_u64[i] = static_cast<uint64_t>(raw[i]);
+    }
   }
-  std::vector<uint64_t> ranges_u64(ranges.begin(), ranges.end());
   MPI_Bcast(ranges_u64.data(), mpi_size + 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+  std::vector<size_t> ranges(ranges_u64.begin(), ranges_u64.end());
   ranges.assign(ranges_u64.begin(), ranges_u64.end());
 
   size_t start_col = ranges[mpi_rank];
