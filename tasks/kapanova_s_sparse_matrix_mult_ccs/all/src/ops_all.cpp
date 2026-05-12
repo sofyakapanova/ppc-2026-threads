@@ -37,7 +37,7 @@ namespace {
 using MpiSizeT = unsigned long long;
 const auto kMpiSizeT = MPI_UNSIGNED_LONG_LONG;
 #else
-using MpiSizeT = size_t;
+using MpiSizeT = unsigned long;
 const auto kMpiSizeT = MPI_UNSIGNED_LONG;
 #endif
 
@@ -151,8 +151,8 @@ void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &valu
   std::vector<int> recv_counts(mpi_size);
   MPI_Gather(&local_nnz, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
   std::vector<int> displs(mpi_size, 0);
+  size_t total = 0;
   if (mpi_rank == 0) {
-    size_t total = 0;
     for (int proc = 0; proc < mpi_size; ++proc) {
       displs[proc] = static_cast<int>(total);
       total += static_cast<size_t>(recv_counts[proc]);
@@ -160,7 +160,7 @@ void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &valu
     nnz = total;
     values.resize(nnz);
   }
-  std::vector<MpiSizeT> tmp_rows(nnz);
+  std::vector<MpiSizeT> tmp_rows(total);
   MPI_Gatherv(send_rows.data(), local_nnz, kMpiSizeT, tmp_rows.data(), recv_counts.data(), displs.data(), kMpiSizeT, 0,
               MPI_COMM_WORLD);
   MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0,
