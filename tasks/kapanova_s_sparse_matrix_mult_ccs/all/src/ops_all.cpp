@@ -37,7 +37,7 @@ namespace {
 using MpiSizeT = unsigned long long;
 const auto kMpiSizeT = MPI_UNSIGNED_LONG_LONG;
 #else
-using MpiSizeT = unsigned long;
+using MpiSizeT = size_t;
 const auto kMpiSizeT = MPI_UNSIGNED_LONG;
 #endif
 
