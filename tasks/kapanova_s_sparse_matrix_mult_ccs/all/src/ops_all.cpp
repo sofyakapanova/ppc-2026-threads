@@ -35,10 +35,10 @@ namespace {
 
 #ifdef _WIN32
 using MpiSizeT = unsigned long long;
-const auto MPI_SIZE_T = MPI_UNSIGNED_LONG_LONG;
+const auto kMpiSizeT = MPI_UNSIGNED_LONG_LONG;
 #else
 using MpiSizeT = unsigned long;
-const auto MPI_SIZE_T = MPI_UNSIGNED_LONG;
+const auto kMpiSizeT = MPI_UNSIGNED_LONG;
 #endif
 
 std::vector<size_t> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
@@ -161,8 +161,8 @@ void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &valu
     values.resize(nnz);
   }
   std::vector<MpiSizeT> tmp_rows(nnz);
-  MPI_Gatherv(send_rows.data(), local_nnz, MPI_SIZE_T, tmp_rows.data(), recv_counts.data(), displs.data(), MPI_SIZE_T,
-              0, MPI_COMM_WORLD);
+  MPI_Gatherv(send_rows.data(), local_nnz, kMpiSizeT, tmp_rows.data(), recv_counts.data(), displs.data(), kMpiSizeT, 0,
+              MPI_COMM_WORLD);
   MPI_Gatherv(send_vals.data(), local_nnz, MPI_DOUBLE, values.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0,
               MPI_COMM_WORLD);
   if (mpi_rank == 0) {
@@ -201,8 +201,8 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
   }
   auto nnz_bcast = static_cast<MpiSizeT>(nnz);
   auto cols_bcast = static_cast<MpiSizeT>(cols) + 1;
-  MPI_Bcast(&nnz_bcast, 1, MPI_SIZE_T, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&cols_bcast, 1, MPI_SIZE_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&nnz_bcast, 1, kMpiSizeT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&cols_bcast, 1, kMpiSizeT, 0, MPI_COMM_WORLD);
   std::vector<MpiSizeT> cp_tmp(cols_bcast);
   std::vector<MpiSizeT> ri_tmp(nnz_bcast);
   if (mpi_rank == 0) {
@@ -213,8 +213,8 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
       ri_tmp[i] = static_cast<MpiSizeT>(row_indices[i]);
     }
   }
-  MPI_Bcast(cp_tmp.data(), static_cast<int>(cols_bcast), MPI_SIZE_T, 0, MPI_COMM_WORLD);
-  MPI_Bcast(ri_tmp.data(), static_cast<int>(nnz_bcast), MPI_SIZE_T, 0, MPI_COMM_WORLD);
+  MPI_Bcast(cp_tmp.data(), static_cast<int>(cols_bcast), kMpiSizeT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(ri_tmp.data(), static_cast<int>(nnz_bcast), kMpiSizeT, 0, MPI_COMM_WORLD);
   if (mpi_rank != 0) {
     cols = static_cast<int>(cols_bcast - 1);
     nnz = nnz_bcast;
@@ -263,7 +263,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   size_t nnz_tmp = 0;
   GatherRowValues(c.row_indices, c.values, nnz_tmp, send_rows, send_vals, local_nnz, mpi_rank, mpi_size);
 
-  int cols_tmp = c.cols;
+  int cols_tmp = static_cast<int>(c.cols);
   GatherAndBroadcast(c.col_ptrs, c.row_indices, c.values, nnz_tmp, cols_tmp, local_sizes, static_cast<int>(local_cols),
                      mpi_rank, mpi_size);
 
