@@ -36,7 +36,7 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 namespace {
 
 using MpiU64 = std::uint64_t;
-MPI_Datatype kMpiU64 = MPI_UINT64_T;
+inline const MPI_Datatype k_mpi_u64 = MPI_UINT64_T;
 
 std::vector<MpiU64> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<MpiU64> ranges(static_cast<size_t>(num_procs) + 1, 0);
@@ -46,31 +46,89 @@ std::vector<MpiU64> ComputeBalancedRanges(int total_cols, int num_procs, const C
   }
 
   std::vector<int> cost(static_cast<size_t>(total_cols), 0);
-  int total_cost = 0;
-#pragma omp parallel for reduction(+ : total_cost) schedule(guided)
-  for (int j = 0; j < total_cols; ++j) {
+  size_t total_cost = 0;
+#pragma omp parallel for reduction(+ : total_cost) schedule(guided) default(none) shared(a, b, cost, total_cols)
+  for (int col = 0; col < total_cols; ++col) {
     int c = 0;
-    for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
+    for (size_t k = b.col_ptrs[col]; k < b.col_ptrs[col + 1]; ++k) {
       c += static_cast<int>(a.col_ptrs[b.row_indices[k] + 1] - a.col_ptrs[b.row_indices[k]]);
     }
-    cost[static_cast<size_t>(j)] = c;
-    total_cost += c;
+    cost[static_cast<size_t>(col)] = c;
+    total_cost += static_cast<size_t>(c);
   }
   if (total_cost == 0) {
     return ranges;
   }
-  int per = total_cost / num_procs;
-  int cur = 0;
-  int acc = 0;
-  for (int p = 1; p < num_procs; ++p) {
-    int target = p * per;
-    while (cur < total_cols && acc < target) {
-      acc += cost[static_cast<size_t>(cur)];
+  size_t per = total_cost / static_cast<size_t>(num_procs);
+  size_t cur = 0;
+  size_t acc = 0;
+  for (int proc = 1; proc < num_procs; ++proc) {
+    size_t target = static_cast<size_t>(proc) * per;
+    while (cur < static_cast<size_t>(total_cols) && acc < target) {
+      acc += static_cast<size_t>(cost[static_cast<size_t>(cur)]);
       ++cur;
     }
-    ranges[static_cast<size_t>(p)] = static_cast<MpiU64>(cur);
+    ranges[static_cast<size_t>(proc)] = static_cast<MpiU64>(cur);
   }
   return ranges;
+}
+
+void ProcessColumn(size_t gcol, const CCSMatrix &a, const CCSMatrix &b, std::vector<MpiU64> &out_rows,
+                   std::vector<MpiU64> &out_cols, std::vector<double> &out_vals, double *accum, char *used,
+                   size_t *active, int &active_count) {
+  for (size_t k = b.col_ptrs[gcol]; k < b.col_ptrs[gcol + 1]; ++k) {
+    size_t row_b = b.row_indices[k];
+    double vb = b.values[k];
+    for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
+      size_t i = a.row_indices[zc];
+      double va = a.values[zc];
+      if (used[i] == 0) {
+        used[i] = 1;
+        active[active_count++] = i;
+        accum[i] = va * vb;
+      } else {
+        accum[i] += va * vb;
+      }
+    }
+  }
+  for (int idx = 0; idx < active_count; ++idx) {
+    size_t i = active[static_cast<size_t>(idx)];
+    if (accum[i] != 0.0) {
+      out_rows.push_back(static_cast<MpiU64>(i));
+      out_cols.push_back(static_cast<MpiU64>(gcol));
+      out_vals.push_back(accum[i]);
+    }
+    used[i] = 0;
+    accum[i] = 0.0;
+  }
+}
+
+void ComputeLocalColumns(size_t start, size_t local_cols, const CCSMatrix &a, const CCSMatrix &b,
+                         std::vector<MpiU64> &send_rows, std::vector<MpiU64> &send_cols,
+                         std::vector<double> &send_vals) {
+#pragma omp parallel default(none) shared(a, b, start, local_cols, send_rows, send_cols, send_vals)
+  {
+    std::vector<double> accum(a.rows, 0.0);
+    std::vector<char> used(static_cast<size_t>(a.rows), 0);
+    std::vector<size_t> active(static_cast<size_t>(a.rows));
+    std::vector<MpiU64> thr_rows;
+    std::vector<MpiU64> thr_cols;
+    std::vector<double> thr_vals;
+    int active_count = 0;
+
+#pragma omp for schedule(guided, 32) nowait
+    for (size_t j = 0; j < local_cols; ++j) {
+      active_count = 0;
+      ProcessColumn(start + j, a, b, thr_rows, thr_cols, thr_vals, accum.data(), used.data(), active.data(),
+                    active_count);
+    }
+#pragma omp critical
+    {
+      send_rows.insert(send_rows.end(), thr_rows.begin(), thr_rows.end());
+      send_cols.insert(send_cols.end(), thr_cols.begin(), thr_cols.end());
+      send_vals.insert(send_vals.end(), thr_vals.begin(), thr_vals.end());
+    }
+  }
 }
 
 }  // namespace
@@ -87,74 +145,28 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-  std::vector<MpiU64> ranges(size + 1, 0);
+  std::vector<MpiU64> ranges(static_cast<size_t>(size) + 1, 0);
   if (rank == 0) {
-    ranges = ComputeBalancedRanges(c.cols, size, a, b);
+    ranges = ComputeBalancedRanges(static_cast<int>(c.cols), size, a, b);
   }
-  MPI_Bcast(ranges.data(), size + 1, kMpiU64, 0, MPI_COMM_WORLD);
+  MPI_Bcast(ranges.data(), size + 1, k_mpi_u64, 0, MPI_COMM_WORLD);
 
-  const size_t start = static_cast<size_t>(ranges[rank]);
-  const size_t local_cols = static_cast<size_t>(ranges[rank + 1]) - start;
+  auto start = static_cast<size_t>(ranges[rank]);
+  auto local_cols = static_cast<size_t>(ranges[rank + 1]) - start;
 
   std::vector<MpiU64> send_rows;
   std::vector<MpiU64> send_cols;
   std::vector<double> send_vals;
 
   if (local_cols > 0) {
-#pragma omp parallel
-    {
-      std::vector<double> accum(a.rows, 0.0);
-      std::vector<char> used(a.rows, 0);
-      std::vector<size_t> active(static_cast<size_t>(a.rows));
-      std::vector<MpiU64> thr_rows;
-      std::vector<MpiU64> thr_cols;
-      std::vector<double> thr_vals;
-
-#pragma omp for schedule(guided) nowait
-      for (size_t j = 0; j < local_cols; ++j) {
-        int ac = 0;
-        const size_t gcol = start + j;
-        for (size_t k = b.col_ptrs[gcol]; k < b.col_ptrs[gcol + 1]; ++k) {
-          size_t row_b = b.row_indices[k];
-          double vb = b.values[k];
-          for (size_t z = a.col_ptrs[row_b]; z < a.col_ptrs[row_b + 1]; ++z) {
-            size_t i = a.row_indices[z];
-            double va = a.values[z];
-            if (!used[i]) {
-              used[i] = 1;
-              active[ac++] = i;
-              accum[i] = va * vb;
-            } else {
-              accum[i] += va * vb;
-            }
-          }
-        }
-        for (int t = 0; t < ac; ++t) {
-          size_t i = active[static_cast<size_t>(t)];
-          if (accum[i] != 0.0) {
-            thr_rows.push_back(static_cast<MpiU64>(i));
-            thr_cols.push_back(static_cast<MpiU64>(gcol));
-            thr_vals.push_back(accum[i]);
-          }
-          used[i] = 0;
-          accum[i] = 0.0;
-        }
-      }
-#pragma omp critical
-      {
-        send_rows.insert(send_rows.end(), thr_rows.begin(), thr_rows.end());
-        send_cols.insert(send_cols.end(), thr_cols.begin(), thr_cols.end());
-        send_vals.insert(send_vals.end(), thr_vals.begin(), thr_vals.end());
-      }
-    }
+    ComputeLocalColumns(start, local_cols, a, b, send_rows, send_cols, send_vals);
   }
 
   int local_nnz = static_cast<int>(send_rows.size());
-
-  std::vector<int> counts(size, 0);
+  std::vector<int> counts(static_cast<size_t>(size), 0);
   MPI_Gather(&local_nnz, 1, MPI_INT, counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-  std::vector<int> displs(size, 0);
+  std::vector<int> displs(static_cast<size_t>(size), 0);
   int total = 0;
   if (rank == 0) {
     for (int i = 0; i < size; ++i) {
@@ -171,8 +183,8 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   const MpiU64 *cp = send_cols.empty() ? nullptr : send_cols.data();
   const double *vp = send_vals.empty() ? nullptr : send_vals.data();
 
-  MPI_Gatherv(rp, local_nnz, kMpiU64, recv_rows.data(), counts.data(), displs.data(), kMpiU64, 0, MPI_COMM_WORLD);
-  MPI_Gatherv(cp, local_nnz, kMpiU64, recv_cols.data(), counts.data(), displs.data(), kMpiU64, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(rp, local_nnz, k_mpi_u64, recv_rows.data(), counts.data(), displs.data(), k_mpi_u64, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(cp, local_nnz, k_mpi_u64, recv_cols.data(), counts.data(), displs.data(), k_mpi_u64, 0, MPI_COMM_WORLD);
   MPI_Gatherv(vp, local_nnz, MPI_DOUBLE, recv_vals.data(), counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   if (rank == 0) {
@@ -185,8 +197,10 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
       std::vector<size_t> idx(static_cast<size_t>(total));
       std::iota(idx.begin(), idx.end(), static_cast<size_t>(0));
       std::sort(idx.begin(), idx.end(), [&](size_t a_idx, size_t b_idx) {
-        if (recv_cols[a_idx] != recv_cols[b_idx]) {
-          return recv_cols[a_idx] < recv_cols[b_idx];
+        const auto lc = recv_cols[a_idx];
+        const auto rc = recv_cols[b_idx];
+        if (lc != rc) {
+          return lc < rc;
         }
         return recv_rows[a_idx] < recv_rows[b_idx];
       });
@@ -202,13 +216,13 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     }
   }
 
-  MpiU64 nnz_b = static_cast<MpiU64>(c.nnz);
-  MpiU64 cols_b = static_cast<MpiU64>(c.cols);
-  MPI_Bcast(&nnz_b, 1, kMpiU64, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&cols_b, 1, kMpiU64, 0, MPI_COMM_WORLD);
+  auto nnz_b = static_cast<MpiU64>(c.nnz);
+  auto cols_b = static_cast<MpiU64>(c.cols);
+  MPI_Bcast(&nnz_b, 1, k_mpi_u64, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&cols_b, 1, k_mpi_u64, 0, MPI_COMM_WORLD);
 
-  int nnz_i = static_cast<int>(nnz_b);
-  int cols_i = static_cast<int>(cols_b);
+  const auto nnz_i = static_cast<int>(nnz_b);
+  const auto cols_i = static_cast<int>(cols_b);
 
   if (rank != 0) {
     c.nnz = static_cast<size_t>(nnz_b);
@@ -218,8 +232,8 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
     c.values.resize(static_cast<size_t>(nnz_i));
   }
 
-  MPI_Bcast(c.col_ptrs.data(), cols_i + 1, kMpiU64, 0, MPI_COMM_WORLD);
-  MPI_Bcast(c.row_indices.data(), nnz_i, kMpiU64, 0, MPI_COMM_WORLD);
+  MPI_Bcast(c.col_ptrs.data(), cols_i + 1, k_mpi_u64, 0, MPI_COMM_WORLD);
+  MPI_Bcast(c.row_indices.data(), nnz_i, k_mpi_u64, 0, MPI_COMM_WORLD);
   MPI_Bcast(c.values.data(), nnz_i, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   return true;
