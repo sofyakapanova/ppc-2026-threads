@@ -35,8 +35,8 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 
 namespace {
 
-using MpiU64 = unsigned long long;
-const auto kMpiU64 = MPI_UNSIGNED_LONG_LONG;
+using MpiU64 = std::uint64_t;
+MPI_Datatype kMpiU64 = MPI_UINT64_T;
 
 std::vector<MpiU64> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<MpiU64> ranges(static_cast<size_t>(num_procs) + 1, 0);
