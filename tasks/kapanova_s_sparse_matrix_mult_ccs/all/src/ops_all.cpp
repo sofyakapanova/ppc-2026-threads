@@ -141,9 +141,9 @@ int PackSendData(const std::vector<int> &local_sizes, size_t local_cols,
 void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &values, size_t &nnz,
                      const std::vector<uint64_t> &send_rows, const std::vector<double> &send_vals, int local_nnz,
                      int mpi_rank, int mpi_size) {
-  std::vector<int> recv_counts(mpi_size);
+  std::vector<int> recv_counts(mpi_rank == 0 ? mpi_size : 0);
   MPI_Gather(&local_nnz, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-  std::vector<int> displs(mpi_size, 0);
+  std::vector<int> displs(mpi_rank == 0 ? mpi_size : 0, 0);
   size_t total = 0;
   if (mpi_rank == 0) {
     for (int proc = 0; proc < mpi_size; ++proc) {
@@ -169,9 +169,9 @@ void GatherRowValues(std::vector<size_t> &row_indices, std::vector<double> &valu
 void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_indices, std::vector<double> &values,
                         size_t &nnz, int &cols, const std::vector<int> &local_sizes, int local_count, int mpi_rank,
                         int mpi_size) {
-  std::vector<int> proc_counts(mpi_size);
+  std::vector<int> proc_counts(mpi_rank == 0 ? mpi_size : 0);
   MPI_Gather(&local_count, 1, MPI_INT, proc_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-  std::vector<int> col_displs(mpi_size, 0);
+  std::vector<int> col_displs(mpi_rank == 0 ? mpi_size : 0, 0);
   std::vector<int> all_col_sizes;
   if (mpi_rank == 0) {
     int total = 0;
@@ -196,8 +196,8 @@ void GatherAndBroadcast(std::vector<size_t> &col_ptrs, std::vector<size_t> &row_
   auto cols_bcast = static_cast<uint64_t>(cols) + 1;
   MPI_Bcast(&nnz_bcast, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
   MPI_Bcast(&cols_bcast, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-  std::vector<uint64_t> cp_tmp(mpi_rank == 0 ? cols_bcast : 1);
-  std::vector<uint64_t> ri_tmp(mpi_rank == 0 ? nnz_bcast : 1);
+  std::vector<uint64_t> cp_tmp(static_cast<size_t>(cols_bcast));
+  std::vector<uint64_t> ri_tmp(static_cast<size_t>(nnz_bcast));
   if (mpi_rank == 0) {
     for (size_t i = 0; i < col_ptrs.size(); ++i) {
       cp_tmp[i] = static_cast<uint64_t>(col_ptrs[i]);
