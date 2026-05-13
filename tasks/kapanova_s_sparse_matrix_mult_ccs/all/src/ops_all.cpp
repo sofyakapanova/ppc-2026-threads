@@ -233,9 +233,10 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   }
 
   auto total_sz = static_cast<size_t>(total);
-  std::vector<MpiU64> recv_rows(rank == 0 ? total_sz : 0);
-  std::vector<MpiU64> recv_cols(rank == 0 ? total_sz : 0);
-  std::vector<double> recv_vals(rank == 0 ? total_sz : 0);
+  auto safe_sz = std::max(total_sz, static_cast<size_t>(1));
+  std::vector<MpiU64> recv_rows(rank == 0 ? safe_sz : 0);
+  std::vector<MpiU64> recv_cols(rank == 0 ? safe_sz : 0);
+  std::vector<double> recv_vals(rank == 0 ? safe_sz : 0);
 
   const MpiU64 *rp = send_rows.empty() ? nullptr : send_rows.data();
   const MpiU64 *cp = send_cols.empty() ? nullptr : send_cols.data();
