@@ -62,7 +62,7 @@ std::vector<MpiU64> ComputeBalancedRanges(int total_cols, int num_procs, const C
   size_t per = total_cost / static_cast<size_t>(num_procs);
   size_t cur = 0;
   size_t acc = 0;
-  size_t total_cols_sz = static_cast<size_t>(total_cols);
+  auto total_cols_sz = static_cast<size_t>(total_cols);
   for (int proc = 1; proc < num_procs; ++proc) {
     size_t target = static_cast<size_t>(proc) * per;
     while (cur < total_cols_sz && acc < target) {
@@ -132,6 +132,61 @@ void ComputeLocalColumns(size_t start, size_t local_cols, const CCSMatrix &a, co
   }
 }
 
+void BuildCcsOnRoot(OutType &c, int total, std::vector<MpiU64> &recv_rows, std::vector<MpiU64> &recv_cols,
+                    std::vector<double> &recv_vals) {
+  c.nnz = static_cast<size_t>(total);
+  c.col_ptrs.assign(static_cast<size_t>(c.cols) + 1, 0);
+  c.row_indices.resize(static_cast<size_t>(total));
+  c.values.resize(static_cast<size_t>(total));
+
+  if (total > 0) {
+    auto total_sz = static_cast<size_t>(total);
+    std::vector<size_t> idx(total_sz);
+    for (size_t i = 0; i < total_sz; ++i) {
+      idx[i] = i;
+    }
+    std::ranges::sort(idx, [&](size_t a_idx, size_t b_idx) {
+      auto lc = recv_cols[a_idx];
+      auto rc = recv_cols[b_idx];
+      if (lc != rc) {
+        return lc < rc;
+      }
+      return recv_rows[a_idx] < recv_rows[b_idx];
+    });
+    for (size_t i = 0; std::cmp_less(i, total_sz); ++i) {
+      size_t src = idx[i];
+      c.row_indices[i] = static_cast<size_t>(recv_rows[src]);
+      c.values[i] = recv_vals[src];
+      c.col_ptrs[recv_cols[src] + 1]++;
+    }
+    for (size_t j = 0; j < static_cast<size_t>(c.cols); ++j) {
+      c.col_ptrs[j + 1] += c.col_ptrs[j];
+    }
+  }
+}
+
+void BroadcastResult(OutType &c, int rank, MPI_Datatype mpi_type) {
+  auto nnz_b = static_cast<MpiU64>(c.nnz);
+  auto cols_b = static_cast<MpiU64>(c.cols);
+  MPI_Bcast(&nnz_b, 1, mpi_type, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&cols_b, 1, mpi_type, 0, MPI_COMM_WORLD);
+
+  auto nnz_i = static_cast<int>(nnz_b);
+  auto cols_i = static_cast<int>(cols_b);
+
+  if (rank != 0) {
+    c.nnz = static_cast<size_t>(nnz_b);
+    c.cols = cols_i;
+    c.col_ptrs.resize(static_cast<size_t>(cols_i) + 1);
+    c.row_indices.resize(static_cast<size_t>(nnz_i));
+    c.values.resize(static_cast<size_t>(nnz_i));
+  }
+
+  MPI_Bcast(c.col_ptrs.data(), cols_i + 1, mpi_type, 0, MPI_COMM_WORLD);
+  MPI_Bcast(c.row_indices.data(), nnz_i, mpi_type, 0, MPI_COMM_WORLD);
+  MPI_Bcast(c.values.data(), nnz_i, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+}
+
 }  // namespace
 
 bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
@@ -191,53 +246,10 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   MPI_Gatherv(vp, local_nnz, MPI_DOUBLE, recv_vals.data(), counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   if (rank == 0) {
-    c.nnz = total_sz;
-    c.col_ptrs.assign(static_cast<size_t>(c.cols) + 1, 0);
-    c.row_indices.resize(total_sz);
-    c.values.resize(total_sz);
-
-    if (total > 0) {
-      std::vector<size_t> idx(total_sz);
-      std::iota(idx.begin(), idx.end(), static_cast<size_t>(0));
-      std::sort(idx.begin(), idx.end(), [&](size_t a_idx, size_t b_idx) {
-        auto lc = recv_cols[a_idx];
-        auto rc = recv_cols[b_idx];
-        if (lc != rc) {
-          return lc < rc;
-        }
-        return recv_rows[a_idx] < recv_rows[b_idx];
-      });
-      for (size_t i = 0; std::cmp_less(i, total_sz); ++i) {
-        size_t src = idx[i];
-        c.row_indices[i] = static_cast<size_t>(recv_rows[src]);
-        c.values[i] = recv_vals[src];
-        c.col_ptrs[recv_cols[src] + 1]++;
-      }
-      for (size_t j = 0; j < static_cast<size_t>(c.cols); ++j) {
-        c.col_ptrs[j + 1] += c.col_ptrs[j];
-      }
-    }
+    BuildCcsOnRoot(c, total, recv_rows, recv_cols, recv_vals);
   }
 
-  auto nnz_b = static_cast<MpiU64>(c.nnz);
-  auto cols_b = static_cast<MpiU64>(c.cols);
-  MPI_Bcast(&nnz_b, 1, kMpiU64, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&cols_b, 1, kMpiU64, 0, MPI_COMM_WORLD);
-
-  auto nnz_i = static_cast<int>(nnz_b);
-  auto cols_i = static_cast<int>(cols_b);
-
-  if (rank != 0) {
-    c.nnz = static_cast<size_t>(nnz_b);
-    c.cols = cols_i;
-    c.col_ptrs.resize(static_cast<size_t>(cols_i) + 1);
-    c.row_indices.resize(static_cast<size_t>(nnz_i));
-    c.values.resize(static_cast<size_t>(nnz_i));
-  }
-
-  MPI_Bcast(c.col_ptrs.data(), cols_i + 1, kMpiU64, 0, MPI_COMM_WORLD);
-  MPI_Bcast(c.row_indices.data(), nnz_i, kMpiU64, 0, MPI_COMM_WORLD);
-  MPI_Bcast(c.values.data(), nnz_i, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  BroadcastResult(c, rank, kMpiU64);
 
   return true;
 }
