@@ -6,8 +6,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <numeric>
-#include <utility>
 #include <vector>
 
 #include "kapanova_s_sparse_matrix_mult_ccs/common/include/common.hpp"
@@ -36,7 +34,7 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 namespace {
 
 using MpiU64 = std::uint64_t;
-const MPI_Datatype kMpiU64 = MPI_UINT64_T;
+MPI_Datatype kMpiU64 = MPI_UINT64_T;
 
 std::vector<MpiU64> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<MpiU64> ranges(static_cast<size_t>(num_procs) + 1, 0);
@@ -153,7 +151,7 @@ void BuildCcsOnRoot(OutType &c, int total, std::vector<MpiU64> &recv_rows, std::
       }
       return recv_rows[a_idx] < recv_rows[b_idx];
     });
-    for (size_t i = 0; std::cmp_less(i, total_sz); ++i) {
+    for (size_t i = 0; i < total_sz; ++i) {
       size_t src = idx[i];
       c.row_indices[i] = static_cast<size_t>(recv_rows[src]);
       c.values[i] = recv_vals[src];
