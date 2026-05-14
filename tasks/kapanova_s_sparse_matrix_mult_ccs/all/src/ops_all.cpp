@@ -34,7 +34,7 @@ bool KapanovaSSparseMatrixMultCCSALL::PostProcessingImpl() {
 namespace {
 
 using MpiU64 = std::uint64_t;
-MPI_Datatype kMpiU64 = MPI_UINT64_T;
+MPI_Datatype k_mpi_u64 = MPI_UINT64_T;
 
 std::vector<MpiU64> ComputeBalancedRanges(int total_cols, int num_procs, const CCSMatrix &a, const CCSMatrix &b) {
   std::vector<MpiU64> ranges(static_cast<size_t>(num_procs) + 1, 0);
@@ -204,7 +204,7 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   if (rank == 0) {
     ranges = ComputeBalancedRanges(static_cast<int>(c.cols), size, a, b);
   }
-  MPI_Bcast(ranges.data(), size + 1, kMpiU64, 0, MPI_COMM_WORLD);
+  MPI_Bcast(ranges.data(), size + 1, k_mpi_u64, 0, MPI_COMM_WORLD);
 
   auto start = static_cast<size_t>(ranges[rank]);
   auto local_cols = static_cast<size_t>(ranges[rank + 1]) - start;
@@ -240,15 +240,15 @@ bool KapanovaSSparseMatrixMultCCSALL::RunImpl() {
   const MpiU64 *cp = send_cols.empty() ? nullptr : send_cols.data();
   const double *vp = send_vals.empty() ? nullptr : send_vals.data();
 
-  MPI_Gatherv(rp, local_nnz, kMpiU64, recv_rows.data(), counts.data(), displs.data(), kMpiU64, 0, MPI_COMM_WORLD);
-  MPI_Gatherv(cp, local_nnz, kMpiU64, recv_cols.data(), counts.data(), displs.data(), kMpiU64, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(rp, local_nnz, k_mpi_u64, recv_rows.data(), counts.data(), displs.data(), k_mpi_u64, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(cp, local_nnz, k_mpi_u64, recv_cols.data(), counts.data(), displs.data(), k_mpi_u64, 0, MPI_COMM_WORLD);
   MPI_Gatherv(vp, local_nnz, MPI_DOUBLE, recv_vals.data(), counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   if (rank == 0) {
     BuildCcsOnRoot(c, total, recv_rows, recv_cols, recv_vals);
   }
 
-  BroadcastResult(c, rank, kMpiU64);
+  BroadcastResult(c, rank, k_mpi_u64);
 
   return true;
 }
