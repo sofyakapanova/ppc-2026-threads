@@ -2,17 +2,17 @@
 
 #include <vector>
 
-#include "olesnitskiy_v_hoare_sort_simple_merge_seq/common/include/common.hpp"
+#include "olesnitskiy_v_hoare_sort_simple_merge/common/include/common.hpp"
 #include "task/include/task.hpp"
 
-namespace olesnitskiy_v_hoare_sort_simple_merge_seq {
+namespace olesnitskiy_v_hoare_sort_simple_merge {
 
-class OlesnitskiyVHoareSortSimpleMergeSEQ : public BaseTask {
+class OlesnitskiyVHoareSortSimpleMergeOMP : public BaseTask {
  public:
   static constexpr ppc::task::TypeOfTask GetStaticTypeOfTask() {
-    return ppc::task::TypeOfTask::kSEQ;
+    return ppc::task::TypeOfTask::kOMP;
   }
-  explicit OlesnitskiyVHoareSortSimpleMergeSEQ(const InType &in);
+  explicit OlesnitskiyVHoareSortSimpleMergeOMP(const InType &in);
 
  private:
   static int HoarePartition(std::vector<int> &array, int left, int right);
@@ -27,4 +27,4 @@ class OlesnitskiyVHoareSortSimpleMergeSEQ : public BaseTask {
   std::vector<int> data_;
 };
 
-}  // namespace olesnitskiy_v_hoare_sort_simple_merge_seq
+}  // namespace olesnitskiy_v_hoare_sort_simple_merge
