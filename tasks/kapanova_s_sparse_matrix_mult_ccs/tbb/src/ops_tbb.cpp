@@ -42,6 +42,83 @@ bool KapanovaSSparseMatrixMultCCSTBB::PostProcessingImpl() {
   return true;
 }
 
+namespace {
+
+void CountColumnSizes(const CCSMatrix &a, const CCSMatrix &b, tbb::combinable<std::vector<size_t>> &comb_sizes,
+                      const tbb::blocked_range<size_t> &range) {
+  auto &sizes = comb_sizes.local();
+  std::vector<double> accum(a.rows, 0.0);
+  std::vector<char> mask(a.rows, 0);
+  std::vector<size_t> active;
+  active.reserve(a.rows / 10);
+
+  for (size_t j = range.begin(); j != range.end(); ++j) {
+    for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
+      size_t row_b = b.row_indices[k];
+      double val_b = b.values[k];
+      for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
+        size_t i = a.row_indices[zc];
+        double val_a = a.values[zc];
+        if (mask[i] == 0) {
+          mask[i] = 1;
+          active.push_back(i);
+          accum[i] = val_a * val_b;
+        } else {
+          accum[i] += val_a * val_b;
+        }
+      }
+    }
+    for (size_t i : active) {
+      if (accum[i] != 0.0) {
+        sizes[j]++;
+      }
+      mask[i] = 0;
+      accum[i] = 0.0;
+    }
+    active.clear();
+  }
+}
+
+void FillColumnValues(const CCSMatrix &a, const CCSMatrix &b, OutType &c,
+                      tbb::combinable<std::vector<size_t>> &comb_pos, const tbb::blocked_range<size_t> &range) {
+  auto &pos = comb_pos.local();
+  std::vector<double> accum(a.rows, 0.0);
+  std::vector<char> mask(a.rows, 0);
+  std::vector<size_t> active;
+  active.reserve(a.rows / 10);
+
+  for (size_t j = range.begin(); j != range.end(); ++j) {
+    for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
+      size_t row_b = b.row_indices[k];
+      double val_b = b.values[k];
+      for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
+        size_t i = a.row_indices[zc];
+        double val_a = a.values[zc];
+        if (mask[i] == 0) {
+          mask[i] = 1;
+          active.push_back(i);
+          accum[i] = val_a * val_b;
+        } else {
+          accum[i] += val_a * val_b;
+        }
+      }
+    }
+    std::ranges::sort(active);
+    for (size_t i : active) {
+      if (accum[i] != 0.0) {
+        c.row_indices[pos[j]] = i;
+        c.values[pos[j]] = accum[i];
+        pos[j]++;
+      }
+      mask[i] = 0;
+      accum[i] = 0.0;
+    }
+    active.clear();
+  }
+}
+
+}  // namespace
+
 bool KapanovaSSparseMatrixMultCCSTBB::RunImpl() {
   const auto &a = std::get<0>(GetInput());
   const auto &b = std::get<1>(GetInput());
@@ -50,43 +127,12 @@ bool KapanovaSSparseMatrixMultCCSTBB::RunImpl() {
   c.rows = a.rows;
   c.cols = b.cols;
 
-  auto cols_sz = static_cast<size_t>(c.cols);
+  const size_t cols_sz = c.cols;
 
   tbb::combinable<std::vector<size_t>> comb_sizes([cols_sz] { return std::vector<size_t>(cols_sz, 0); });
 
-  tbb::parallel_for(tbb::blocked_range<size_t>(0, cols_sz, 64), [&](const tbb::blocked_range<size_t> &range) {
-    auto &sizes = comb_sizes.local();
-    std::vector<double> accum(a.rows, 0.0);
-    std::vector<char> mask(a.rows, false);
-    std::vector<size_t> active;
-    active.reserve(a.rows / 10);
-
-    for (size_t j = range.begin(); j != range.end(); ++j) {
-      for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
-        size_t row_b = b.row_indices[k];
-        double val_b = b.values[k];
-        for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
-          size_t i = a.row_indices[zc];
-          double val_a = a.values[zc];
-          if (!mask[i]) {
-            mask[i] = true;
-            active.push_back(i);
-            accum[i] = val_a * val_b;
-          } else {
-            accum[i] += val_a * val_b;
-          }
-        }
-      }
-      for (size_t i : active) {
-        if (accum[i] != 0.0) {
-          sizes[j]++;
-        }
-        mask[i] = false;
-        accum[i] = 0.0;
-      }
-      active.clear();
-    }
-  });
+  tbb::parallel_for(tbb::blocked_range<size_t>(0, cols_sz, 64),
+                    [&](const tbb::blocked_range<size_t> &range) { CountColumnSizes(a, b, comb_sizes, range); });
 
   std::vector<size_t> col_sizes(cols_sz, 0);
   comb_sizes.combine_each([&](const std::vector<size_t> &local) {
@@ -111,42 +157,8 @@ bool KapanovaSSparseMatrixMultCCSTBB::RunImpl() {
 
   tbb::combinable<std::vector<size_t>> comb_pos([col_pos] { return col_pos; });
 
-  tbb::parallel_for(tbb::blocked_range<size_t>(0, cols_sz, 64), [&](const tbb::blocked_range<size_t> &range) {
-    auto &pos = comb_pos.local();
-    std::vector<double> accum(a.rows, 0.0);
-    std::vector<char> mask(a.rows, false);
-    std::vector<size_t> active;
-    active.reserve(a.rows / 10);
-
-    for (size_t j = range.begin(); j != range.end(); ++j) {
-      for (size_t k = b.col_ptrs[j]; k < b.col_ptrs[j + 1]; ++k) {
-        size_t row_b = b.row_indices[k];
-        double val_b = b.values[k];
-        for (size_t zc = a.col_ptrs[row_b]; zc < a.col_ptrs[row_b + 1]; ++zc) {
-          size_t i = a.row_indices[zc];
-          double val_a = a.values[zc];
-          if (!mask[i]) {
-            mask[i] = true;
-            active.push_back(i);
-            accum[i] = val_a * val_b;
-          } else {
-            accum[i] += val_a * val_b;
-          }
-        }
-      }
-      std::sort(active.begin(), active.end());
-      for (size_t i : active) {
-        if (accum[i] != 0.0) {
-          c.row_indices[pos[j]] = i;
-          c.values[pos[j]] = accum[i];
-          pos[j]++;
-        }
-        mask[i] = false;
-        accum[i] = 0.0;
-      }
-      active.clear();
-    }
-  });
+  tbb::parallel_for(tbb::blocked_range<size_t>(0, cols_sz, 64),
+                    [&](const tbb::blocked_range<size_t> &range) { FillColumnValues(a, b, c, comb_pos, range); });
 
   return true;
 }
